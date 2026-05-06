@@ -1,286 +1,293 @@
 #include <stdio.h>
+//#include "pico/stdlib.h"
+#include <math.h>
+
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
-#include <std_msgs/msg/int32.h> //comentar
-#include <geometry_msgs/msg/vector3_stamped.h> //comentar
+
 #include <rmw_microros/rmw_microros.h>
 
 #include <nav_msgs/msg/odometry.h>
 #include <tf2_msgs/msg/tf_message.h>
 #include <geometry_msgs/msg/transform_stamped.h> 
+#include <sensor_msgs/msg/imu.h>
+#include <sensor_msgs/msg/magnetic_field.h>
+#include <std_msgs/msg/float32.h>
+#include <sensor_msgs/msg/range.h>
 
-#include "pico/stdlib.h"
 #include "pico_uart_transports.h"
-#include "hardware/spi.h"
+#include "aux/pmw3901.h"
+#include "aux/mpu9250.h"
+#include "aux/sharpIR.h"
+#include "hcsr04.h"
 
-const uint LED_PIN = 25;
+#define LED_PIN 25
 
-double x = 0.0;
-double y = 0.0;
-double theta = 0.0;
-
-const double PMW_SCALE = 0.001; //calibrar depois de acordo com datasheet
-const double DT = 0.05;
-
-//Pinout for Pico 2
-#define PIN_MISO 16 
-#define PIN_MOSI 19
-#define PIN_SCK 18
-#define PIN_CS 17
-#define INTERFACE_SPI spi0
-
-//Register List
-#define PRODUCT_ID          0x00
-#define REVISION_ID         0x01
-#define MOTION              0x02
-#define DELTA_X_L           0x03
-#define DELTA_X_H           0x04
-#define DELTA_Y_L           0x05
-#define DELTA_Y_H           0x06
-#define SQUAL               0x07
-#define RAWDATA_SUM         0x08
-#define MAXIMUM_RAWDATA     0x09
-#define MINIMUM_RAWDATA     0x0A
-#define SHUTTER_LOWER       0x0B
-#define SHUTTER_UPPER       0x0C
-#define OBSERVATION         0x15
-#define MOTION_BURST        0x16
-#define POWER_UP_RESET      0x3A
-#define SHUTDOWN            0x3B
-#define RAWDATA_GRAB        0x58
-#define RAWDATA_GRAB_STATUS 0x59
-#define INVERSE_PRODUCT_ID  0x5F
-
-//Reset Register List
-#define PRODUCT_ID_RST          0x49
-#define REVISION_ID_RST         0x00
-#define MOTION_RST              0x00
-#define DELTA_X_L_RST           0x00
-#define DELTA_X_H_RST           0x00
-#define DELTA_Y_L_RST           0x00
-#define DELTA_Y_H_RST           0x00
-#define SQUAL_RST               0x00
-#define RAWDATA_SUM_RST         0x00
-#define MAXIMUM_RAWDATA_RST     0x00
-#define MINIMUM_RAWDATA_RST     0x00
-#define SHUTTER_LOWER_RST       0x00
-#define SHUTTER_UPPER_RST       0x00
-#define OBSERVATION_RST         0x00
-#define MOTION_BURST_RST        0x00
-#define RAWDATA_GRAB_RST        0x00
-#define RAWDATA_GRAB_STATUS_RST 0x00
-#define INVERSE_PRODUCT_ID_RST  0xB6
-
-static inline void cs_activate() {
-    asm volatile("nop \n nop \n nop"); 
-    gpio_put(PIN_CS, 0); 
-    asm volatile("nop \n nop \n nop");
-}
-
-static inline void cs_deactivate() {
-    asm volatile("nop \n nop \n nop"); 
-    gpio_put(PIN_CS, 1); 
-    asm volatile("nop \n nop \n nop");
-}
-
-void init_spi() {
-    gpio_init(PIN_CS);
-    gpio_set_dir(PIN_CS, GPIO_OUT);
-    gpio_put(PIN_CS, 1);
-
-    spi_init(spi0, 2000*1000);
-    gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-
-    spi_set_format(spi0, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
-}
-
-void pmw3901_write(uint8_t reg, uint8_t data) {
-    uint8_t buffer[] = {reg | 0x80, data}; //Máscara para escrita 1000 000 
-    
-    cs_activate();
-    spi_write_blocking(spi0, buffer, 2);
-    cs_deactivate();
-    sleep_us(50);
-}
-
-uint8_t pmw3901_read(uint8_t reg) {
-    uint8_t addr = reg & 0x7F; //Máscara para leitura 0111 1111
-    uint8_t value = 0;
-
-    cs_activate();
-    spi_write_blocking(spi0, &addr, 1);
-    sleep_us(50);
-    spi_read_blocking(spi0, 0, &value, 1);
-    cs_deactivate();
-
-    return value;
-}
-
-void pmw3901_init_registers() {
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x61, 0xAD);
-    pmw3901_write(0x7F, 0x03);
-    pmw3901_write(0x40, 0x00);
-    pmw3901_write(0x7F, 0x05);
-    pmw3901_write(0x41, 0xB3);
-    pmw3901_write(0x43, 0xF1);
-    pmw3901_write(0x45, 0x14);
-    pmw3901_write(0x5B, 0x32);
-    pmw3901_write(0x5F, 0x34);
-    pmw3901_write(0x7B, 0x08);
-    pmw3901_write(0x7F, 0x06);
-    pmw3901_write(0x44, 0x1B);
-    pmw3901_write(0x40, 0xBF);
-    pmw3901_write(0x4E, 0x3F);
-    pmw3901_write(0x7F, 0x08);
-    pmw3901_write(0x65, 0x20);
-    pmw3901_write(0x6A, 0x18);
-    pmw3901_write(0x7F, 0x09);
-    pmw3901_write(0x4F, 0xAF);
-    pmw3901_write(0x5F, 0x40);
-    pmw3901_write(0x48, 0x80);
-    pmw3901_write(0x49, 0x80);
-    pmw3901_write(0x57, 0x77);
-    pmw3901_write(0x60, 0x78);
-    pmw3901_write(0x61, 0x78);
-    pmw3901_write(0x62, 0x08);
-    pmw3901_write(0x63, 0x50);
-    pmw3901_write(0x7F, 0x0A);
-    pmw3901_write(0x45, 0x60);
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x4D, 0x11);
-    pmw3901_write(0x55, 0x80);
-    pmw3901_write(0x74, 0x1F);
-    pmw3901_write(0x75, 0x1F);
-    pmw3901_write(0x4A, 0x78);
-    pmw3901_write(0x4B, 0x78);
-    pmw3901_write(0x44, 0x08);
-    pmw3901_write(0x45, 0x50);
-    pmw3901_write(0x64, 0xFF);
-    pmw3901_write(0x65, 0x1F);
-    pmw3901_write(0x7F, 0x14);
-    pmw3901_write(0x65, 0x60);
-    pmw3901_write(0x66, 0x08);
-    pmw3901_write(0x63, 0x78);
-    pmw3901_write(0x7F, 0x15);
-    pmw3901_write(0x48, 0x58);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x41, 0x0D);
-    pmw3901_write(0x43, 0x14);
-    pmw3901_write(0x4B, 0x0E);
-    pmw3901_write(0x45, 0x0F);
-    pmw3901_write(0x44, 0x42);
-    pmw3901_write(0x4C, 0x80);
-    pmw3901_write(0x7F, 0x10);
-    pmw3901_write(0x5B, 0x02);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x40, 0x41);
-    pmw3901_write(0x70, 0x00);
-
-    sleep_ms(100);
-    pmw3901_write(0x32, 0x44);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x40, 0x40);
-    pmw3901_write(0x7F, 0x06);
-    pmw3901_write(0x62, 0xf0);
-    pmw3901_write(0x63, 0x00);
-    pmw3901_write(0x7F, 0x0D);
-    pmw3901_write(0x48, 0xC0);
-    pmw3901_write(0x6F, 0xd5);
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x5B, 0xa0);
-    pmw3901_write(0x4E, 0xA8);
-    pmw3901_write(0x5A, 0x50);
-    pmw3901_write(0x40, 0x80);
-}
+#define ECHO_PIN 13
+#define TRIG_PIN 12
 
 typedef struct {
-    int16_t dx;
-    int16_t dy;
-} pmw3901_t;
+    volatile uint64_t start_time;
+    volatile uint64_t end_time;
+    volatile bool measure_done;
+    float distance;
 
-pmw3901_t pmw3901_read_motion() {
-    pmw3901_t pmw3901;
-    uint8_t h, l;
-    pmw3901_read(MOTION); //trava os valores de leitura
+} hcsr04_t;
 
-    h = pmw3901_read(DELTA_X_H);
-    l = pmw3901_read(DELTA_X_L);
-    pmw3901.dx = (int16_t) ((h << 8) | l);
+pmw3901_t pmw3901;
+mpu9250_t mpu9250;
+hcsr04_t hcsr04;
 
-    h = pmw3901_read(DELTA_Y_H);
-    l = pmw3901_read(DELTA_Y_L);
-    pmw3901.dy = (int16_t) ((h << 8) | l);
+float x = 0.0;
+float y = 0.0;
+float theta = 0.0;
 
-    return pmw3901;
-}
-//-----------------------------------------------------------
+struct repeating_timer trig_timer;
 
-rcl_publisher_t publisher;
-nav_msgs__msg__Odometry msg;
+rcl_publisher_t odom_publisher;
+nav_msgs__msg__Odometry odom_msg;
 
 rcl_publisher_t tf_publisher;
 tf2_msgs__msg__TFMessage tf_msg;
-geometry_msgs__msg__TransformStamped tf;
 
+rcl_publisher_t imu_publisher;
+sensor_msgs__msg__Imu imu_msg;
+
+rcl_publisher_t mag_publisher;
+sensor_msgs__msg__MagneticField mag_msg;
+
+rcl_publisher_t ir_publisher;
+sensor_msgs__msg__Range ir_msg;
+
+rcl_publisher_t us_publisher;
+sensor_msgs__msg__Range us_msg;
+
+void gpio_irq_handler(uint gpio, uint32_t events) {
+    if (gpio == ECHO_PIN && (events & GPIO_IRQ_EDGE_RISE)) {
+        hcsr04.start_time = to_us_since_boot(get_absolute_time());
+    } else if (gpio == ECHO_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
+        hcsr04.end_time = to_us_since_boot(get_absolute_time());
+        uint64_t duration = hcsr04.end_time - hcsr04.start_time;
+        hcsr04.distance = (duration * 0.0343f) / 2.0f;
+        hcsr04.measure_done = true;
+    }
+}
+
+int64_t trig_off_callback(alarm_id_t id, void *user_data) {
+    gpio_put(TRIG_PIN, 0);
+    return 0;
+}
+
+bool trig_on_callback(struct repeating_timer *t) {
+    gpio_put(TRIG_PIN, 1);
+    add_alarm_in_us(10, trig_off_callback, NULL, false);
+    return true;
+}
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     (void) last_call_time;
     if(timer == NULL) return;
 
-    pmw3901_t pmw3901 = pmw3901_read_motion();
+    pmw3901_update_values(&pmw3901);
+    mpu9250_update_values(&mpu9250);
 
-    double dx = pmw3901.dx * PMW_SCALE;
-    double dy = pmw3901.dy * PMW_SCALE;
+    uint16_t raw;
+    float voltage;
+    float distance_cm = sharpIR_read(&raw, &voltage);
+    float distance_m = distance_cm / 100.0f;
 
-    x += dx;
-    y += dy;
+    //
+
+    float gz = mpu9250.gyro[2];
+    theta += gz * DT;
+
+    float c = cos(theta);
+    float s = sin(theta);
+
+    x += pmw3901.dx_m * c - pmw3901.dy_m * s;
+    y += pmw3901.dx_m * s + pmw3901.dy_m * c;
+
+    float half = theta * 0.5;
+    float qw = cos(half);
+    float qz = sin(half);
+
+    //
 
     int64_t time_ns = rmw_uros_epoch_nanos();
-    msg.header.stamp.sec = (int32_t) (time_ns / 1000000000);
-    msg.header.stamp.nanosec = (uint32_t) (time_ns % 1000000000);
+    int32_t sec = (int32_t)(time_ns / 1000000000);
+    uint32_t nsec = (uint32_t)(time_ns % 1000000000);
 
-    msg.pose.pose.position.x = x; //Posição
-    msg.pose.pose.position.y = y;
-    msg.pose.pose.position.z = 0.0; 
+    odom_msg.header.stamp.sec = sec;
+    odom_msg.header.stamp.nanosec = nsec;
 
-    msg.pose.pose.orientation.w = 1.0; //Quaternion
-    msg.pose.pose.orientation.x = 0.0;
-    msg.pose.pose.orientation.y = 0.0;
-    msg.pose.pose.orientation.z = 0.0;
+    // Timestamp atual
+    tf_msg.transforms.data[0].header.stamp.sec = sec;
+    tf_msg.transforms.data[0].header.stamp.nanosec = nsec;
 
-    msg.twist.twist.linear.x = dx / DT;
-    msg.twist.twist.linear.y = dy / DT;
-    msg.twist.twist.linear.z = 0.0;
-    msg.twist.twist.angular.z = 0.0;
+    tf_msg.transforms.data[1].header.stamp.sec = sec;
+    tf_msg.transforms.data[1].header.stamp.nanosec = nsec;
 
-    tf.header.stamp = msg.header.stamp;
+    imu_msg.header.stamp.sec = sec;
+    imu_msg.header.stamp.nanosec = nsec;
 
-    tf.transform.translation.x = x;
-    tf.transform.translation.y = y;
-    tf.transform.translation.z = 0.0;
+    mag_msg.header.stamp.sec = sec;
+    mag_msg.header.stamp.nanosec = nsec;
 
-    tf.transform.rotation.w = 1.0;
-    tf.transform.rotation.x = 0.0;
-    tf.transform.rotation.y = 0.0;
-    tf.transform.rotation.z = 0.0;
+    ir_msg.header.stamp.sec = sec;
+    ir_msg.header.stamp.nanosec = nsec;
+
+    //Odom
+
+    odom_msg.pose.pose.position.x = x;
+    odom_msg.pose.pose.position.y = y;
+    odom_msg.pose.pose.position.z = 0.0;
+
+    odom_msg.pose.pose.orientation.w = qw;
+    odom_msg.pose.pose.orientation.x = 0.0;
+    odom_msg.pose.pose.orientation.y = 0.0;
+    odom_msg.pose.pose.orientation.z = qz;
+
+    odom_msg.twist.twist.linear.x = pmw3901.dx_m / DT;
+    odom_msg.twist.twist.linear.y = pmw3901.dy_m / DT;
+    odom_msg.twist.twist.linear.z = 0.0;
+
+    odom_msg.twist.twist.angular.x = 0.0;
+    odom_msg.twist.twist.angular.y = 0.0;
+    odom_msg.twist.twist.angular.z = gz;
+
+    //TF
+
+    tf_msg.transforms.data[0].transform.translation.x = x;
+    tf_msg.transforms.data[0].transform.translation.y = y;
+    tf_msg.transforms.data[0].transform.translation.z = 0.0;
+
+    tf_msg.transforms.data[0].transform.rotation.w = qw;
+    tf_msg.transforms.data[0].transform.rotation.x = 0.0;
+    tf_msg.transforms.data[0].transform.rotation.y = 0.0;
+    tf_msg.transforms.data[0].transform.rotation.z = qz;
+
+    tf_msg.transforms.data[1].transform.translation.x = 0.10f;
+    tf_msg.transforms.data[1].transform.translation.y = 0.0f;
+    tf_msg.transforms.data[1].transform.translation.z = 0.05f;
+
+    // tf_msg.transforms.data[1].transform.rotation.w = 1.0f;
+    // tf_msg.transforms.data[1].transform.rotation.x = 0.0f;
+    // tf_msg.transforms.data[1].transform.rotation.y = 0.0f;
+    // tf_msg.transforms.data[1].transform.rotation.z = 0.0f;
+
+    float yaw_ir = 0.0f; // ajuste aqui
+    float half_ir = yaw_ir * 0.5f;
+
+    tf_msg.transforms.data[1].transform.rotation.w = cosf(half_ir);
+    tf_msg.transforms.data[1].transform.rotation.x = 0.0f;
+    tf_msg.transforms.data[1].transform.rotation.y = 0.0f;
+    tf_msg.transforms.data[1].transform.rotation.z = sinf(half_ir);
+
+    tf_msg.transforms.data[2].transform.translation.x = 0.10f;
+    tf_msg.transforms.data[2].transform.translation.y = 0.0f;
+    tf_msg.transforms.data[2].transform.translation.z = 0.05f;
+
+    tf_msg.transforms.data[2].transform.rotation.w = 1.0f;
+    tf_msg.transforms.data[2].transform.rotation.x = 0.0f;
+    tf_msg.transforms.data[2].transform.rotation.y = 0.0f;
+    tf_msg.transforms.data[2].transform.rotation.z = 0.0f;
+
+    //Imu
+
+    imu_msg.linear_acceleration.x = mpu9250.accel[0];
+    imu_msg.linear_acceleration.y = mpu9250.accel[1];
+    imu_msg.linear_acceleration.z = mpu9250.accel[2];
+
+    imu_msg.angular_velocity.x = mpu9250.gyro[0];
+    imu_msg.angular_velocity.y = mpu9250.gyro[1];
+    imu_msg.angular_velocity.z = mpu9250.gyro[2];
+
+    imu_msg.orientation.w = qw;
+    imu_msg.orientation.x = 0.0;
+    imu_msg.orientation.y = 0.0;
+    imu_msg.orientation.z = qz;
+
+    for (int i = 0; i < 9; i++) {
+        imu_msg.orientation_covariance[i] = 0.0;
+        imu_msg.angular_velocity_covariance[i] = 0.0;
+        imu_msg.linear_acceleration_covariance[i] = 0.0;
+    }
+
+    imu_msg.orientation_covariance[0] = 0.01;
+    imu_msg.orientation_covariance[4] = 0.01;
+    imu_msg.orientation_covariance[8] = 0.01;
+
+    imu_msg.angular_velocity_covariance[0] = 0.01;
+    imu_msg.angular_velocity_covariance[4] = 0.01;
+    imu_msg.angular_velocity_covariance[8] = 0.01;
+
+    imu_msg.linear_acceleration_covariance[0] = 0.1;
+    imu_msg.linear_acceleration_covariance[4] = 0.1;
+    imu_msg.linear_acceleration_covariance[8] = 0.1;
+
+    //Mag
+
+    mag_msg.magnetic_field.x = mpu9250.mag[0];
+    mag_msg.magnetic_field.y = mpu9250.mag[1];
+    mag_msg.magnetic_field.z = mpu9250.mag[2];
+
+    //Range
+
+    ir_msg.range = distance_m; 
+    us_msg.range = hcsr04.distance / 100.0f; // se estiver em cm  
+
+    //
 
     rcl_publish(&tf_publisher, &tf_msg, NULL);
-    rcl_publish(&publisher, &msg, NULL);
+    rcl_publish(&odom_publisher, &odom_msg, NULL);
+    rcl_publish(&imu_publisher, &imu_msg, NULL);
+    rcl_publish(&mag_publisher, &mag_msg, NULL);
+    rcl_publish(&ir_publisher, &ir_msg, NULL);
+    rcl_publish(&us_publisher, &us_msg, NULL);
 
     gpio_put(LED_PIN, !gpio_get(LED_PIN));
-    
+}
+
+void hcsr04_init(void) {
+    gpio_init(TRIG_PIN);
+    gpio_set_dir(TRIG_PIN, GPIO_OUT);
+    gpio_put(TRIG_PIN, 0);
+
+    gpio_init(ECHO_PIN);
+    gpio_set_dir(ECHO_PIN, GPIO_IN);
+    gpio_pull_down(ECHO_PIN);
+    gpio_set_irq_enabled_with_callback(ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+    add_repeating_timer_ms(60, trig_on_callback, NULL, &trig_timer);
 }
 
 int main() {
     stdio_init_all();
 
     init_spi();
+    i2c_activate();
+    mpu9250_init(INTERFACE_I2C);
     pmw3901_init_registers();
+    sharpIR_init();
+
+    //hcsr04_init();
+
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, 0);
+
+    gpio_init(TRIG_PIN);
+    gpio_set_dir(TRIG_PIN, GPIO_OUT);
+    gpio_put(TRIG_PIN, 0);
+
+    gpio_init(ECHO_PIN);
+    gpio_set_dir(ECHO_PIN, GPIO_IN);
+    gpio_pull_down(ECHO_PIN);
+    gpio_set_irq_enabled_with_callback(ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+    add_repeating_timer_ms(60, trig_on_callback, NULL, &trig_timer);
 
     rmw_uros_set_custom_transport(
 		true,
@@ -291,12 +298,6 @@ int main() {
 		pico_serial_transport_read
 	);
 
-    rcl_timer_t timer;
-    rcl_node_t node;
-    rcl_allocator_t allocator;
-    rclc_support_t support;
-    rclc_executor_t executor;
-
     const int timeout_ms = 1000; 
     const uint8_t attempts = 120;
 
@@ -304,40 +305,119 @@ int main() {
         return 1;
     }
 
-    allocator = rcl_get_default_allocator();
+    rcl_allocator_t allocator = rcl_get_default_allocator();
+    rcl_timer_t timer;
+    rcl_node_t node;
+    rclc_support_t support;
+    rclc_executor_t executor;
+
     rclc_support_init(&support, 0, NULL, &allocator);
     rclc_node_init_default(&node, "pico_pmw3901", "", &support);
     
+    //Publishers
     rclc_publisher_init_default(
-        &publisher,
+        &odom_publisher,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
         "odom"
     );
 
     rclc_publisher_init_default(
-    &tf_publisher,
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(tf2_msgs, msg, TFMessage),
-    "/tf"
+        &tf_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(tf2_msgs, msg, TFMessage),
+        "/tf"
     );
 
-    rosidl_runtime_c__String__assign(&msg.header.frame_id, "odom");
-    rosidl_runtime_c__String__assign(&msg.child_frame_id, "base_link");
+    rclc_publisher_init_default(
+        &imu_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
+        "imu/data"
+    );
 
-    rosidl_runtime_c__String__assign(&tf.header.frame_id, "odom");
-    rosidl_runtime_c__String__assign(&tf.child_frame_id, "base_link");
+    rclc_publisher_init_default(
+        &mag_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, MagneticField),
+        "imu/mag"
+    );
+
+    rclc_publisher_init_default(
+        &ir_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "ir_range"
+    );
+
+    rclc_publisher_init_default(
+        &us_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Range),
+        "us_range"
+    );
+
+    nav_msgs__msg__Odometry__init(&odom_msg);
+    tf2_msgs__msg__TFMessage__init(&tf_msg);   
+    sensor_msgs__msg__Imu__init(&imu_msg);
+    sensor_msgs__msg__MagneticField__init(&mag_msg);
+    sensor_msgs__msg__Range__init(&ir_msg); 
+    sensor_msgs__msg__Range__init(&us_msg); 
+
+    rosidl_runtime_c__String__assign(&odom_msg.header.frame_id, "odom");
+    rosidl_runtime_c__String__assign(&odom_msg.child_frame_id, "base_link");
+    rosidl_runtime_c__String__assign(&ir_msg.header.frame_id, "ir_link");
+    rosidl_runtime_c__String__assign(&us_msg.header.frame_id, "us_link");
+
+    // tf_msg.transforms.size = 2;
+    // tf_msg.transforms.capacity = 2;
+    tf_msg.transforms.size = 3;
+    tf_msg.transforms.capacity = 3;
+    tf_msg.transforms.data = malloc(sizeof(geometry_msgs__msg__TransformStamped) * 3);
+
+    ir_msg.radiation_type = sensor_msgs__msg__Range__INFRARED;
+    ir_msg.field_of_view = 0.26;   // ~15 graus (ajuste se quiser)
+    ir_msg.min_range = 0.10;     
+    ir_msg.max_range = 0.80;  
+
+    us_msg.radiation_type = sensor_msgs__msg__Range__ULTRASOUND;
+    us_msg.field_of_view = 0.5;     // ~30 graus típico HC-SR04
+    us_msg.min_range = 0.02;        // 2 cm
+    us_msg.max_range = 4.0;         // 4 m
+
+    geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[0]);
+    geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[1]);
+    geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[2]);
+
+    tf_msg.transforms.data[0].header.frame_id.data = "odom";
+    tf_msg.transforms.data[0].header.frame_id.size = 4;
+    tf_msg.transforms.data[0].header.frame_id.capacity = 5;
+
+    tf_msg.transforms.data[0].child_frame_id.data = "base_link";
+    tf_msg.transforms.data[0].child_frame_id.size = 9;
+    tf_msg.transforms.data[0].child_frame_id.capacity = 10;
+
+    tf_msg.transforms.data[1].header.frame_id.data = "base_link";
+    tf_msg.transforms.data[1].header.frame_id.size = 9;
+    tf_msg.transforms.data[1].header.frame_id.capacity = 10;
+
+    tf_msg.transforms.data[1].child_frame_id.data = "ir_link";
+    tf_msg.transforms.data[1].child_frame_id.size = 7;
+    tf_msg.transforms.data[1].child_frame_id.capacity = 8;
+
+    tf_msg.transforms.data[2].header.frame_id.data = "base_link";
+    tf_msg.transforms.data[2].header.frame_id.size = 9;
+    tf_msg.transforms.data[2].header.frame_id.capacity = 10;
+
+    tf_msg.transforms.data[2].child_frame_id.data = "us_link";
+    tf_msg.transforms.data[2].child_frame_id.size = 7;
+    tf_msg.transforms.data[2].child_frame_id.capacity = 8;
 
     rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(50), timer_callback);
     rclc_executor_init(&executor, &support.context, 1, &allocator);
     rclc_executor_add_timer(&executor, &timer);
 
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    gpio_put(LED_PIN, 0);
-
     while(1) {
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     }
-
 }
