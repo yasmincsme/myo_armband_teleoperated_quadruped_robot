@@ -21,20 +21,9 @@
 #include "aux/pmw3901.h"
 #include "aux/mpu9250.h"
 #include "aux/sharpIR.h"
-#include "hcsr04.h"
+#include "aux/hcsr04.h"
 
 #define LED_PIN 25
-
-#define ECHO_PIN 13
-#define TRIG_PIN 12
-
-typedef struct {
-    volatile uint64_t start_time;
-    volatile uint64_t end_time;
-    volatile bool measure_done;
-    float distance;
-
-} hcsr04_t;
 
 pmw3901_t pmw3901;
 mpu9250_t mpu9250;
@@ -43,8 +32,6 @@ hcsr04_t hcsr04;
 float x = 0.0;
 float y = 0.0;
 float theta = 0.0;
-
-struct repeating_timer trig_timer;
 
 rcl_publisher_t odom_publisher;
 nav_msgs__msg__Odometry odom_msg;
@@ -64,27 +51,6 @@ sensor_msgs__msg__Range ir_msg;
 rcl_publisher_t us_publisher;
 sensor_msgs__msg__Range us_msg;
 
-void gpio_irq_handler(uint gpio, uint32_t events) {
-    if (gpio == ECHO_PIN && (events & GPIO_IRQ_EDGE_RISE)) {
-        hcsr04.start_time = to_us_since_boot(get_absolute_time());
-    } else if (gpio == ECHO_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
-        hcsr04.end_time = to_us_since_boot(get_absolute_time());
-        uint64_t duration = hcsr04.end_time - hcsr04.start_time;
-        hcsr04.distance = (duration * 0.0343f) / 2.0f;
-        hcsr04.measure_done = true;
-    }
-}
-
-int64_t trig_off_callback(alarm_id_t id, void *user_data) {
-    gpio_put(TRIG_PIN, 0);
-    return 0;
-}
-
-bool trig_on_callback(struct repeating_timer *t) {
-    gpio_put(TRIG_PIN, 1);
-    add_alarm_in_us(10, trig_off_callback, NULL, false);
-    return true;
-}
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     (void) last_call_time;
@@ -250,19 +216,6 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     gpio_put(LED_PIN, !gpio_get(LED_PIN));
 }
 
-void hcsr04_init(void) {
-    gpio_init(TRIG_PIN);
-    gpio_set_dir(TRIG_PIN, GPIO_OUT);
-    gpio_put(TRIG_PIN, 0);
-
-    gpio_init(ECHO_PIN);
-    gpio_set_dir(ECHO_PIN, GPIO_IN);
-    gpio_pull_down(ECHO_PIN);
-    gpio_set_irq_enabled_with_callback(ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-
-    add_repeating_timer_ms(60, trig_on_callback, NULL, &trig_timer);
-}
-
 int main() {
     stdio_init_all();
 
@@ -271,23 +224,7 @@ int main() {
     mpu9250_init(INTERFACE_I2C);
     pmw3901_init_registers();
     sharpIR_init();
-
-    //hcsr04_init();
-
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    gpio_put(LED_PIN, 0);
-
-    gpio_init(TRIG_PIN);
-    gpio_set_dir(TRIG_PIN, GPIO_OUT);
-    gpio_put(TRIG_PIN, 0);
-
-    gpio_init(ECHO_PIN);
-    gpio_set_dir(ECHO_PIN, GPIO_IN);
-    gpio_pull_down(ECHO_PIN);
-    gpio_set_irq_enabled_with_callback(ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-
-    add_repeating_timer_ms(60, trig_on_callback, NULL, &trig_timer);
+    hcsr04_init(&hcsr04);
 
     rmw_uros_set_custom_transport(
 		true,

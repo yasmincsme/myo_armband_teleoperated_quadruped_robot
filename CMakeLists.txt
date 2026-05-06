@@ -19,7 +19,7 @@ add_executable(pico_micro_ros_example
     aux/pmw3901.c
     aux/mpu9250.c
     aux/sharpIR.c
-    #hcsr04.c
+    aux/hcsr04.c
 )
 
 target_link_libraries(pico_micro_ros_example
