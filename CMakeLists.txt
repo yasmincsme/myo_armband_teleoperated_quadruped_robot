@@ -16,6 +16,8 @@ link_directories(libmicroros)
 add_executable(pico_micro_ros_example
     pico_micro_ros_example.c
     pico_uart_transport.c
+    aux/spi_dma.c
+    aux/i2c_dma.c
     aux/pmw3901.c
     aux/mpu9250.c
     aux/sharpIR.c
@@ -27,7 +29,9 @@ target_link_libraries(pico_micro_ros_example
     microros
     hardware_spi
     hardware_i2c
+    hardware_uart
     hardware_adc
+    hardware_dma
 )
 
 target_include_directories(pico_micro_ros_example PUBLIC
@@ -38,8 +42,10 @@ SET(CMAKE_C_FLAGS  "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")
 SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 
 # Configure Pico
-pico_enable_stdio_usb(pico_micro_ros_example 1)
-pico_enable_stdio_uart(pico_micro_ros_example 1)
+# UART1 (GPIO8/TX, GPIO9/RX) initialised directly by the transport layer.
+# stdio not needed for micro-ROS; disable both to avoid pin conflicts.
+pico_enable_stdio_usb(pico_micro_ros_example 0)
+pico_enable_stdio_uart(pico_micro_ros_example 0)
 add_compile_definitions(PICO_UART_ENABLE_CRLF_SUPPORT=0)
 add_compile_definitions(PICO_STDIO_ENABLE_CRLF_SUPPORT=0)
 add_compile_definitions(PICO_STDIO_DEFAULT_CRLF=0)

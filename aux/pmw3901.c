@@ -1,160 +1,130 @@
-#include <time.h>
-#include "pico/stdlib.h"
-#include "hardware/spi.h"
 #include "pmw3901.h"
+#include "spi_dma.h"
+#include "pico/stdlib.h"
+#include "pico/time.h"
+#include "hardware/gpio.h"
 
-static inline void cs_activate() {
-    asm volatile("nop \n nop \n nop"); 
-    gpio_put(PIN_CS, 0); 
-    asm volatile("nop \n nop \n nop");
+/* ── Module state ───────────────────────────────────────────────────────── */
+static spi_dma_t      _spi;
+static volatile int   _stage    = 0;   /* 0=uninit 1=waiting100ms 2=do_phase2 3=done */
+static pmw3901_done_cb_t _done_cb = NULL;
+
+/* Burst read state */
+#define BURST_LEN 6   /* address + MOTION + DX_L + DX_H + DY_L + DY_H */
+static uint8_t          _tx_buf[BURST_LEN];
+static uint8_t          _rx_buf[BURST_LEN];
+static pmw3901_t       *_out_ptr = NULL;
+static pmw3901_done_cb_t _read_cb = NULL;
+
+/* ── Blocking helpers (init only — never call while DMA is active) ───────── */
+static void _write_reg(uint8_t reg, uint8_t val) {
+    uint8_t buf[2] = { (uint8_t)(reg | 0x80), val };
+    gpio_put(_spi.cs_pin, 0);
+    spi_write_blocking(_spi.spi, buf, 2);
+    gpio_put(_spi.cs_pin, 1);
+    sleep_us(180);   /* T_SWW */
 }
 
-static inline void cs_deactivate() {
-    asm volatile("nop \n nop \n nop"); 
-    gpio_put(PIN_CS, 1); 
-    asm volatile("nop \n nop \n nop");
+uint8_t pmw3901_read_reg(uint8_t reg) {
+    uint8_t addr = reg & 0x7F;
+    uint8_t val;
+    gpio_put(_spi.cs_pin, 0);
+    spi_write_blocking(_spi.spi, &addr, 1);
+    sleep_us(35);    /* T_SRAD */
+    spi_read_blocking(_spi.spi, 0x00, &val, 1);
+    gpio_put(_spi.cs_pin, 1);
+    sleep_us(200);   /* T_SRW/T_SRC */
+    return val;
 }
 
-void init_spi() {
-    gpio_init(PIN_CS);
-    gpio_set_dir(PIN_CS, GPIO_OUT);
-    gpio_put(PIN_CS, 1);
-
-    spi_init(spi0, 2000*1000);
-    gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-
-    spi_set_format(spi0, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
+/* ── Init alarm ─────────────────────────────────────────────────────────── */
+static int64_t _alarm_cb(alarm_id_t id, void *u) {
+    (void)id; (void)u;
+    _stage = 2;
+    return 0;
 }
 
-void pmw3901_write(uint8_t reg, uint8_t data) {
-    uint8_t buffer[] = {reg | 0x80, data}; //Máscara para escrita 1000 0000 
-    
-    cs_activate();
-    spi_write_blocking(spi0, buffer, 2);
-    cs_deactivate();
-    sleep_us(50);
+/* ── Public init ─────────────────────────────────────────────────────────── */
+void pmw3901_init(pmw3901_done_cb_t on_done) {
+    _done_cb = on_done;
+
+    spi_dma_init(&_spi, INTERFACE_SPI, PIN_CS, SPI_HZ,
+                 PIN_MISO, PIN_MOSI, PIN_SCK,
+                 SPI_CPOL_1, SPI_CPHA_1);
+
+    /* Phase 1: register table (blocking, ~15 ms) */
+    _write_reg(0x7F, 0x00); _write_reg(0x61, 0xAD);
+    _write_reg(0x7F, 0x03); _write_reg(0x40, 0x00);
+    _write_reg(0x7F, 0x05);
+    _write_reg(0x41, 0xB3); _write_reg(0x43, 0xF1); _write_reg(0x45, 0x14);
+    _write_reg(0x5B, 0x32); _write_reg(0x5F, 0x34); _write_reg(0x7B, 0x08);
+    _write_reg(0x7F, 0x06);
+    _write_reg(0x44, 0x1B); _write_reg(0x40, 0xBF); _write_reg(0x4E, 0x3F);
+    _write_reg(0x7F, 0x08);
+    _write_reg(0x65, 0x20); _write_reg(0x6A, 0x18);
+    _write_reg(0x7F, 0x09);
+    _write_reg(0x4F, 0xAF); _write_reg(0x5F, 0x40); _write_reg(0x48, 0x80);
+    _write_reg(0x49, 0x80); _write_reg(0x57, 0x77); _write_reg(0x60, 0x78);
+    _write_reg(0x61, 0x78); _write_reg(0x62, 0x08); _write_reg(0x63, 0x50);
+    _write_reg(0x7F, 0x0A); _write_reg(0x45, 0x60);
+    _write_reg(0x7F, 0x00);
+    _write_reg(0x4D, 0x11); _write_reg(0x55, 0x80);
+    _write_reg(0x74, 0x1F); _write_reg(0x75, 0x1F);
+    _write_reg(0x4A, 0x78); _write_reg(0x4B, 0x78);
+    _write_reg(0x44, 0x08); _write_reg(0x45, 0x50);
+    _write_reg(0x64, 0xFF); _write_reg(0x65, 0x1F);
+    _write_reg(0x7F, 0x14);
+    _write_reg(0x65, 0x60); _write_reg(0x66, 0x08); _write_reg(0x63, 0x78);
+    _write_reg(0x7F, 0x15); _write_reg(0x48, 0x58);
+    _write_reg(0x7F, 0x07);
+    _write_reg(0x41, 0x0D); _write_reg(0x43, 0x14); _write_reg(0x4B, 0x0E);
+    _write_reg(0x45, 0x0F); _write_reg(0x44, 0x42); _write_reg(0x4C, 0x80);
+    _write_reg(0x7F, 0x10); _write_reg(0x5B, 0x02);
+    _write_reg(0x7F, 0x07); _write_reg(0x40, 0x41); _write_reg(0x70, 0x00);
+
+    _stage = 1;
+    add_alarm_in_ms(100, _alarm_cb, NULL, false);
 }
 
-uint8_t pmw3901_read(uint8_t reg) {
-    uint8_t addr = reg & 0x7F; //Máscara para leitura 0111 1111
-    uint8_t value = 0;
+void pmw3901_init_poll(void) {
+    if (_stage != 2) return;
 
-    cs_activate();
-    spi_write_blocking(spi0, &addr, 1);
-    sleep_us(50);
-    spi_read_blocking(spi0, 0, &value, 1);
-    cs_deactivate();
+    /* Phase 2: register table (blocking, ~2.5 ms) */
+    _write_reg(0x32, 0x44);
+    _write_reg(0x7F, 0x07); _write_reg(0x40, 0x40);
+    _write_reg(0x7F, 0x06); _write_reg(0x62, 0xF0); _write_reg(0x63, 0x00);
+    _write_reg(0x7F, 0x0D); _write_reg(0x48, 0xC0); _write_reg(0x6F, 0xD5);
+    _write_reg(0x7F, 0x00);
+    _write_reg(0x5B, 0xA0); _write_reg(0x4E, 0xA8);
+    _write_reg(0x5A, 0x50); _write_reg(0x40, 0x80);
 
-    return value;
+    _stage = 3;
+    if (_done_cb) _done_cb();
 }
 
-//Latência absurda
-void pmw3901_init_registers() {
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x61, 0xAD);
-    pmw3901_write(0x7F, 0x03);
-    pmw3901_write(0x40, 0x00);
-    pmw3901_write(0x7F, 0x05);
-    pmw3901_write(0x41, 0xB3);
-    pmw3901_write(0x43, 0xF1);
-    pmw3901_write(0x45, 0x14);
-    pmw3901_write(0x5B, 0x32);
-    pmw3901_write(0x5F, 0x34);
-    pmw3901_write(0x7B, 0x08);
-    pmw3901_write(0x7F, 0x06);
-    pmw3901_write(0x44, 0x1B);
-    pmw3901_write(0x40, 0xBF);
-    pmw3901_write(0x4E, 0x3F);
-    pmw3901_write(0x7F, 0x08);
-    pmw3901_write(0x65, 0x20);
-    pmw3901_write(0x6A, 0x18);
-    pmw3901_write(0x7F, 0x09);
-    pmw3901_write(0x4F, 0xAF);
-    pmw3901_write(0x5F, 0x40);
-    pmw3901_write(0x48, 0x80);
-    pmw3901_write(0x49, 0x80);
-    pmw3901_write(0x57, 0x77);
-    pmw3901_write(0x60, 0x78);
-    pmw3901_write(0x61, 0x78);
-    pmw3901_write(0x62, 0x08);
-    pmw3901_write(0x63, 0x50);
-    pmw3901_write(0x7F, 0x0A);
-    pmw3901_write(0x45, 0x60);
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x4D, 0x11);
-    pmw3901_write(0x55, 0x80);
-    pmw3901_write(0x74, 0x1F);
-    pmw3901_write(0x75, 0x1F);
-    pmw3901_write(0x4A, 0x78);
-    pmw3901_write(0x4B, 0x78);
-    pmw3901_write(0x44, 0x08);
-    pmw3901_write(0x45, 0x50);
-    pmw3901_write(0x64, 0xFF);
-    pmw3901_write(0x65, 0x1F);
-    pmw3901_write(0x7F, 0x14);
-    pmw3901_write(0x65, 0x60);
-    pmw3901_write(0x66, 0x08);
-    pmw3901_write(0x63, 0x78);
-    pmw3901_write(0x7F, 0x15);
-    pmw3901_write(0x48, 0x58);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x41, 0x0D);
-    pmw3901_write(0x43, 0x14);
-    pmw3901_write(0x4B, 0x0E);
-    pmw3901_write(0x45, 0x0F);
-    pmw3901_write(0x44, 0x42);
-    pmw3901_write(0x4C, 0x80);
-    pmw3901_write(0x7F, 0x10);
-    pmw3901_write(0x5B, 0x02);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x40, 0x41);
-    pmw3901_write(0x70, 0x00);
+bool pmw3901_init_done(void) { return _stage == 3; }
 
-    sleep_ms(100);
-    pmw3901_write(0x32, 0x44);
-    pmw3901_write(0x7F, 0x07);
-    pmw3901_write(0x40, 0x40);
-    pmw3901_write(0x7F, 0x06);
-    pmw3901_write(0x62, 0xf0);
-    pmw3901_write(0x63, 0x00);
-    pmw3901_write(0x7F, 0x0D);
-    pmw3901_write(0x48, 0xC0);
-    pmw3901_write(0x6F, 0xd5);
-    pmw3901_write(0x7F, 0x00);
-    pmw3901_write(0x5B, 0xa0);
-    pmw3901_write(0x4E, 0xA8);
-    pmw3901_write(0x5A, 0x50);
-    pmw3901_write(0x40, 0x80);
-}
-
-void pmw3901_update_values(pmw3901_t* sensor) {
-    if(sensor == NULL) return;
-
-    uint8_t motion_reg = pmw3901_read(MOTION);
-    sensor->motion = (motion_reg & 0x80) ? 1 : 0;
-    sensor->squal = pmw3901_read(SQUAL);
-
-    if(!sensor->motion) {
-        sensor->dx = 0;
-        sensor->dy = 0;
-        sensor->dx_m = 0.0f;
-        sensor->dy_m = 0.0f;
-        return;
+/* ── Async burst read ───────────────────────────────────────────────────── */
+static void _burst_done(void *user_data) {
+    (void)user_data;
+    _out_ptr->motion = _rx_buf[1];
+    if (_out_ptr->motion & 0x80) {
+        _out_ptr->dx   = (int16_t)(((uint16_t)_rx_buf[3] << 8) | _rx_buf[2]);
+        _out_ptr->dy   = (int16_t)(((uint16_t)_rx_buf[5] << 8) | _rx_buf[4]);
+        _out_ptr->dx_m = _out_ptr->dx * PMW_SCALE;
+        _out_ptr->dy_m = _out_ptr->dy * PMW_SCALE;
+    } else {
+        _out_ptr->dx   = 0; _out_ptr->dy   = 0;
+        _out_ptr->dx_m = 0.0f; _out_ptr->dy_m = 0.0f;
     }
+    if (_read_cb) _read_cb();
+}
 
-    uint8_t h, l;
-
-    h = pmw3901_read(DELTA_X_H);
-    l = pmw3901_read(DELTA_X_L);
-    sensor->dx = (int16_t)((h << 8) | l);
-
-    h = pmw3901_read(DELTA_Y_H);
-    l = pmw3901_read(DELTA_Y_L);
-    sensor->dy = (int16_t)((h << 8) | l);
-
-    sensor->dx_m = sensor->dx * PMW_SCALE;
-    sensor->dy_m = sensor->dy * PMW_SCALE;
-
+void pmw3901_read_async(pmw3901_t *out, pmw3901_done_cb_t on_done) {
+    if (_spi.busy) return;   /* previous transfer not yet done — drop this read */
+    _out_ptr  = out;
+    _read_cb  = on_done;
+    _tx_buf[0] = 0x02 & 0x7F;  /* MOTION register, read mode */
+    for (int i = 1; i < BURST_LEN; i++) _tx_buf[i] = 0x00;
+    spi_dma_transfer(&_spi, _tx_buf, _rx_buf, BURST_LEN, _burst_done, NULL);
 }
