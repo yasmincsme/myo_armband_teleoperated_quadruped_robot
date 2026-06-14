@@ -46,15 +46,24 @@ static rcl_node_t       node;
 static rcl_timer_t      ros_timer;
 static rclc_executor_t  executor;
 
-static rcl_publisher_t  odom_pub, tf_pub, imu_pub, mag_pub, ir_pub, us_pub;
+static rcl_publisher_t  odom_pub, tf_pub, imu_pub, mag_pub, ir_pub, us_pub, fused_pub;
 
 static nav_msgs__msg__Odometry         odom_msg;
 static tf2_msgs__msg__TFMessage        tf_msg;
 static sensor_msgs__msg__Imu           imu_msg;
 static sensor_msgs__msg__MagneticField mag_msg;
-static sensor_msgs__msg__Range         ir_msg, us_msg;
+static sensor_msgs__msg__Range         ir_msg, us_msg, fused_msg;
 
 static bool _entities_ok = false;
+
+/* ── Kalman filter state for IR + sonar fusion ────────────────── */
+#define KF_Q          0.001f  /* process noise variance (m²)                  */
+#define KF_R_IR_NEAR  0.003f  /* IR noise at close range  → more trusted      */
+#define KF_R_IR_FAR   0.020f  /* IR noise at far range    → less trusted      */
+#define KF_R_US_NEAR  0.020f  /* sonar noise at close range → less trusted    */
+#define KF_R_US_FAR   0.003f  /* sonar noise at far range   → more trusted    */
+static float _kf_x = 0.5f;   /* state estimate (m)                            */
+static float _kf_P = 1.0f;   /* error covariance                              */
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     (void)last_call_time;
@@ -177,17 +186,43 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
 
     //Range
 
+    float us_m = hcsr04.distance / 100.0f;
     ir_msg.range = distance_m;
-    us_msg.range = hcsr04.distance / 100.0f;
+    us_msg.range = us_m;
+
+    //Kalman fusion
+
+    _kf_P += KF_Q;
+
+    /* t in [0,1]: 0 = close (0.02m), 1 = far (4.0m) */
+    float t = fmaxf(0.0f, fminf(1.0f, _kf_x / 4.0f));
+    float r_ir_dyn = KF_R_IR_NEAR + t * (KF_R_IR_FAR - KF_R_IR_NEAR);
+    float r_us_dyn = KF_R_US_NEAR + t * (KF_R_US_FAR - KF_R_US_NEAR);
+
+    float r_ir = (distance_m >= 0.10f && distance_m <= 0.80f) ? r_ir_dyn : 100.0f;
+    float k_ir = _kf_P / (_kf_P + r_ir);
+    _kf_x += k_ir * (distance_m - _kf_x);
+    _kf_P *= (1.0f - k_ir);
+
+    if (us_m >= 0.02f && us_m <= 4.0f) {
+        float k_us = _kf_P / (_kf_P + r_us_dyn);
+        _kf_x += k_us * (us_m - _kf_x);
+        _kf_P *= (1.0f - k_us);
+    }
+
+    fused_msg.header.stamp.sec     = sec;
+    fused_msg.header.stamp.nanosec = nsec;
+    fused_msg.range = _kf_x;
 
     //
 
-    rcl_publish(&tf_pub,   &tf_msg,   NULL);
-    rcl_publish(&odom_pub, &odom_msg, NULL);
-    rcl_publish(&imu_pub,  &imu_msg,  NULL);
-    rcl_publish(&mag_pub,  &mag_msg,  NULL);
-    rcl_publish(&ir_pub,   &ir_msg,   NULL);
-    rcl_publish(&us_pub,   &us_msg,   NULL);
+    rcl_publish(&tf_pub,    &tf_msg,    NULL);
+    rcl_publish(&odom_pub,  &odom_msg,  NULL);
+    rcl_publish(&imu_pub,   &imu_msg,   NULL);
+    rcl_publish(&mag_pub,   &mag_msg,   NULL);
+    rcl_publish(&ir_pub,    &ir_msg,    NULL);
+    rcl_publish(&us_pub,    &us_msg,    NULL);
+    rcl_publish(&fused_pub, &fused_msg, NULL);
 
     gpio_put(LED_PIN, !gpio_get(LED_PIN));
 }
@@ -212,8 +247,9 @@ static bool create_entities(void) {
     MKPUB(tf_pub,   tf2_msgs,    msg, TFMessage,    "/tf");
     MKPUB(imu_pub,  sensor_msgs, msg, Imu,          "imu/data");
     MKPUB(mag_pub,  sensor_msgs, msg, MagneticField, "imu/mag");
-    MKPUB(ir_pub,   sensor_msgs, msg, Range,         "ir_range");
-    MKPUB(us_pub,   sensor_msgs, msg, Range,         "us_range");
+    MKPUB(ir_pub,    sensor_msgs, msg, Range, "ir_range");
+    MKPUB(us_pub,    sensor_msgs, msg, Range, "us_range");
+    MKPUB(fused_pub, sensor_msgs, msg, Range, "fused_range");
 #undef MKPUB
 
     /* Odometry */
@@ -258,6 +294,13 @@ static bool create_entities(void) {
     us_msg.min_range      = 0.02f;
     us_msg.max_range      = 4.0f;
 
+    sensor_msgs__msg__Range__init(&fused_msg);
+    rosidl_runtime_c__String__assign(&fused_msg.header.frame_id, "base_link");
+    fused_msg.radiation_type = sensor_msgs__msg__Range__INFRARED;
+    fused_msg.field_of_view  = 0.26f;
+    fused_msg.min_range      = 0.02f;
+    fused_msg.max_range      = 4.0f;
+
     /* Timer and executor */
     if (rclc_timer_init_default(
             &ros_timer, &support,
@@ -281,8 +324,9 @@ static void destroy_entities(void) {
     rcl_publisher_fini(&tf_pub,   &node);
     rcl_publisher_fini(&imu_pub,  &node);
     rcl_publisher_fini(&mag_pub,  &node);
-    rcl_publisher_fini(&ir_pub,   &node);
-    rcl_publisher_fini(&us_pub,   &node);
+    rcl_publisher_fini(&ir_pub,    &node);
+    rcl_publisher_fini(&us_pub,    &node);
+    rcl_publisher_fini(&fused_pub, &node);
     rcl_timer_fini(&ros_timer);
     rclc_executor_fini(&executor);
     rcl_node_fini(&node);
@@ -302,6 +346,7 @@ static void destroy_entities(void) {
     sensor_msgs__msg__MagneticField__fini(&mag_msg);
     sensor_msgs__msg__Range__fini(&ir_msg);
     sensor_msgs__msg__Range__fini(&us_msg);
+    sensor_msgs__msg__Range__fini(&fused_msg);
 
     _entities_ok = false;
 }
