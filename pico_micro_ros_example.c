@@ -11,11 +11,13 @@
 #include <nav_msgs/msg/odometry.h>
 #include <tf2_msgs/msg/tf_message.h>
 #include <geometry_msgs/msg/transform_stamped.h>
+#include <geometry_msgs/msg/twist.h>
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/magnetic_field.h>
 #include <sensor_msgs/msg/range.h>
 
 #include "pico_uart_transports.h"
+#include "hardware/uart.h"
 #include "aux/pmw3901.h"
 #include "aux/mpu9250.h"
 #include "aux/i2c_dma.h"
@@ -25,15 +27,7 @@
 #define LED_PIN  25
 #define DT       0.05f
 
-/* ── micro-ROS agent state machine (RESTRIÇÃO 7) ─────────────── */
-typedef enum {
-    WAITING_AGENT,
-    AGENT_AVAILABLE,
-    AGENT_CONNECTED,
-    AGENT_DISCONNECTED,
-} agent_state_t;
-
-/* ── Hardware objects (persist across reconnects) ─────────────── */
+/* ── Hardware objects ─────────────────────────────────────────── */
 static mpu9250_t mpu9250;
 static hcsr04_t  hcsr04;
 
@@ -47,14 +41,79 @@ static rcl_timer_t      ros_timer;
 static rclc_executor_t  executor;
 
 static rcl_publisher_t  odom_pub, tf_pub, imu_pub, mag_pub, ir_pub, us_pub, fused_pub;
+static rcl_subscription_t        cmd_vel_sub;
 
 static nav_msgs__msg__Odometry         odom_msg;
 static tf2_msgs__msg__TFMessage        tf_msg;
 static sensor_msgs__msg__Imu           imu_msg;
 static sensor_msgs__msg__MagneticField mag_msg;
 static sensor_msgs__msg__Range         ir_msg, us_msg, fused_msg;
+static geometry_msgs__msg__Twist       cmd_vel_msg;
 
-static bool _entities_ok = false;
+/* ── SSC-32 servo controller (UART0 / GPIO 0=TX, 1=RX) ───────── */
+#define SSC_UART      uart1
+#define SSC_TX_PIN    8
+#define SSC_RX_PIN    9
+#define SSC_BAUD      115200
+#define OBSTACLE_M    0.15f
+#define GAIT_QUERY_US 20000u
+
+static const char REST_CMD[] =
+    "#0 P1200 #1 P1100 #2 P1100 "
+    "#14 P1800 #13 P1800 #12 P2000 "
+    "#16 P1800 #17 P1800 #18 P1900 "
+    "#30 P1300 #29 P1300 #28 P1000 T200";
+
+#define GAIT_FWD_N   10
+#define GAIT_LEFT_N  10
+#define GAIT_RIGHT_N 10
+
+static const char *GAIT_FWD[GAIT_FWD_N] = {
+    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1400 #30 P1700 #29 P1400 #28 P900 T200",
+    "#30 P1300 #29 P1100 #28 P1600 T100",
+    "#30 P1300 #29 P1300 #28 P1600 T100",
+    "#16 P1800 #17 P2000 #18 P1900 T100",
+    "#16 P1600 #17 P1800 #18 P2000 T100",
+    "#0 P1200 #1 P1100 #2 P1600 #14 P1600 #13 P1700 #12 P2100 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
+    "#14 P1800 #13 P2000 #12 P1500 T100",
+    "#14 P1800 #13 P1700 #12 P1500 T100",
+    "#0 P1300 #1 P1000 #2 P1000 T100",
+    "#0 P1500 #1 P1200 #2 P900 T100",
+};
+
+static const char *GAIT_LEFT[GAIT_LEFT_N] = {
+    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
+    "#30 P1300 #29 P1100 #28 P1600 T100",
+    "#30 P1300 #29 P1300 #28 P1600 T100",
+    "#0 P1200 #1 P1000 #2 P1600 T100",
+    "#0 P1200 #1 P1200 #2 P1600 T100",
+    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
+    "#16 P1800 #17 P2000 #18 P2200 T100",
+    "#16 P1800 #17 P1800 #18 P2200 T100",
+    "#14 P1800 #13 P2000 #12 P2300 T100",
+    "#14 P1800 #13 P1700 #12 P2300 T100",
+};
+
+static const char *GAIT_RIGHT[GAIT_RIGHT_N] = {
+    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
+    "#30 P1300 #29 P1100 #28 P700 T100",
+    "#30 P1300 #29 P1300 #28 P700 T100",
+    "#0 P1200 #1 P1000 #2 P800 T100",
+    "#0 P1200 #1 P1200 #2 P800 T100",
+    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
+    "#16 P1800 #17 P2000 #18 P1400 T100",
+    "#16 P1800 #17 P1800 #18 P1400 T100",
+    "#14 P1800 #13 P2000 #12 P1500 T100",
+    "#14 P1800 #13 P1700 #12 P1500 T100",
+};
+
+typedef enum { MOTION_NONE, MOTION_FORWARD, MOTION_LEFT, MOTION_RIGHT } motion_mode_t;
+typedef enum { GAIT_IDLE, GAIT_MOVING, GAIT_QUERYING } gait_fsm_t;
+
+static volatile motion_mode_t _motion    = MOTION_NONE;
+static gait_fsm_t             _gait_fsm  = GAIT_IDLE;
+static int                    _gait_step = 0;
+static uint64_t               _last_q_us = 0;
 
 /* ── Kalman filter state for IR + sonar fusion ────────────────── */
 #define KF_Q          0.001f  /* process noise variance (m²)                  */
@@ -64,6 +123,90 @@ static bool _entities_ok = false;
 #define KF_R_US_FAR   0.003f  /* sonar noise at far range   → more trusted    */
 static float _kf_x = 0.5f;   /* state estimate (m)                            */
 static float _kf_P = 1.0f;   /* error covariance                              */
+
+/* ── SSC-32 helpers ───────────────────────────────────────────── */
+static void ssc_send(const char *cmd) {
+    uart_puts(SSC_UART, cmd);
+    uart_putc(SSC_UART, '\r');
+}
+
+static void ssc_step_send(void) {
+    const char **steps;
+    int n;
+    switch (_motion) {
+        case MOTION_FORWARD: steps = GAIT_FWD;   n = GAIT_FWD_N;   break;
+        case MOTION_LEFT:    steps = GAIT_LEFT;  n = GAIT_LEFT_N;  break;
+        case MOTION_RIGHT:   steps = GAIT_RIGHT; n = GAIT_RIGHT_N; break;
+        default: return;
+    }
+    ssc_send(steps[_gait_step % n]);
+}
+
+/* Called every main-loop iteration; advances gait only when SSC-32
+   confirms the previous move is done AND no obstacle is within 15 cm. */
+static void gait_service(void) {
+    if (_gait_fsm == GAIT_IDLE) return;
+
+    uint64_t now = time_us_64();
+
+    if (_gait_fsm == GAIT_MOVING) {
+        if (now - _last_q_us >= GAIT_QUERY_US) {
+            uart_puts(SSC_UART, "Q\r");
+            _last_q_us = now;
+            _gait_fsm  = GAIT_QUERYING;
+        }
+        return;
+    }
+
+    /* GAIT_QUERYING: wait for SSC-32 response byte */
+    if (!uart_is_readable(SSC_UART)) return;
+
+    char c = (char)uart_getc(SSC_UART);
+    if (c == '+') {
+        /* Still moving — re-query after interval */
+        _gait_fsm = GAIT_MOVING;
+    } else if (c == '.') {
+        /* Move complete — check obstacle before advancing */
+        if (_kf_x <= OBSTACLE_M) {
+            ssc_send(REST_CMD);
+            _gait_fsm = GAIT_IDLE;
+            _motion   = MOTION_NONE;
+        } else {
+            _gait_step++;
+            ssc_step_send();
+            _last_q_us = time_us_64();
+            _gait_fsm  = GAIT_MOVING;
+        }
+    }
+    /* other chars (echoes, CR/LF): ignore */
+}
+
+static void cmd_vel_callback(const void *msgin) {
+    const geometry_msgs__msg__Twist *msg = msgin;
+    float lx = msg->linear.x;
+    float az = msg->angular.z;
+
+    motion_mode_t m;
+    if (fabsf(lx) < 0.05f && fabsf(az) < 0.05f)
+        m = MOTION_NONE;
+    else if (fabsf(az) > 0.05f)
+        m = (az > 0.0f) ? MOTION_LEFT : MOTION_RIGHT;
+    else
+        m = MOTION_FORWARD;
+
+    if (m == _motion) return;
+
+    _motion    = m;
+    _gait_step = 0;
+    if (m == MOTION_NONE) {
+        ssc_send(REST_CMD);
+        _gait_fsm = GAIT_IDLE;
+    } else {
+        ssc_step_send();
+        _last_q_us = time_us_64();
+        _gait_fsm  = GAIT_MOVING;
+    }
+}
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     (void)last_call_time;
@@ -301,6 +444,10 @@ static bool create_entities(void) {
     fused_msg.min_range      = 0.02f;
     fused_msg.max_range      = 4.0f;
 
+    /* /cmd_vel subscriber */
+    rclc_subscription_init_default(&cmd_vel_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/cmd_vel");
+
     /* Timer and executor */
     if (rclc_timer_init_default(
             &ros_timer, &support,
@@ -309,46 +456,16 @@ static bool create_entities(void) {
         return false;
     }
     if (rclc_executor_init(
-            &executor, &support.context, 1, &allocator) != RCL_RET_OK) {
+            &executor, &support.context, 2, &allocator) != RCL_RET_OK) {
         rcl_timer_fini(&ros_timer);
         rclc_support_fini(&support);
         return false;
     }
     rclc_executor_add_timer(&executor, &ros_timer);
+    memset(&cmd_vel_msg, 0, sizeof(cmd_vel_msg));
+    rclc_executor_add_subscription(&executor, &cmd_vel_sub, &cmd_vel_msg,
+        cmd_vel_callback, ON_NEW_DATA);
     return true;
-}
-
-static void destroy_entities(void) {
-    if (!_entities_ok) return;
-    rcl_publisher_fini(&odom_pub, &node);
-    rcl_publisher_fini(&tf_pub,   &node);
-    rcl_publisher_fini(&imu_pub,  &node);
-    rcl_publisher_fini(&mag_pub,  &node);
-    rcl_publisher_fini(&ir_pub,    &node);
-    rcl_publisher_fini(&us_pub,    &node);
-    rcl_publisher_fini(&fused_pub, &node);
-    rcl_timer_fini(&ros_timer);
-    rclc_executor_fini(&executor);
-    rcl_node_fini(&node);
-    rclc_support_fini(&support);
-
-    /* Free TF data manually to avoid double-free */
-    if (tf_msg.transforms.data) {
-        geometry_msgs__msg__TransformStamped__fini(
-            &tf_msg.transforms.data[0]);
-        free(tf_msg.transforms.data);
-        tf_msg.transforms.data     = NULL;
-        tf_msg.transforms.size     = 0;
-        tf_msg.transforms.capacity = 0;
-    }
-    nav_msgs__msg__Odometry__fini(&odom_msg);
-    sensor_msgs__msg__Imu__fini(&imu_msg);
-    sensor_msgs__msg__MagneticField__fini(&mag_msg);
-    sensor_msgs__msg__Range__fini(&ir_msg);
-    sensor_msgs__msg__Range__fini(&us_msg);
-    sensor_msgs__msg__Range__fini(&fused_msg);
-
-    _entities_ok = false;
 }
 
 /* ── PMW3901 bringup callback ─────────────────────────────────── */
@@ -379,6 +496,12 @@ int main(void) {
     sharpIR_init();
     hcsr04_init(&hcsr04);
 
+    /* SSC-32 servo controller */
+    uart_init(SSC_UART, SSC_BAUD);
+    gpio_set_function(SSC_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(SSC_RX_PIN, GPIO_FUNC_UART);
+    ssc_send(REST_CMD);
+
     /* Wait for PMW3901 bringup to complete (interrupts do the work) */
     uint32_t t0 = to_ms_since_boot(get_absolute_time());
     while (!pmw3901_ready()) {
@@ -402,51 +525,14 @@ int main(void) {
         pico_serial_transport_read
     );
 
-    agent_state_t state     = WAITING_AGENT;
-    uint64_t      last_ping = 0;
+    rmw_uros_sync_session(1000);
+    create_entities();
 
     while (1) {
-        /* Service PMW3901 read chain every iteration (RESTRIÇÃO 5) */
         pmw3901_service();
-
-        /* Kick async IMU read whenever the bus is free */
+        gait_service();
         if (!i2c_dma_busy())
             mpu9250_read_async(&mpu9250, NULL, NULL);
-
-        switch (state) {
-
-        /* Poll until an agent responds */
-        case WAITING_AGENT:
-            if (rmw_uros_ping_agent(100, 1) == RMW_RET_OK)
-                state = AGENT_AVAILABLE;
-            break;
-
-        /* Agent seen — sync time then create all ROS entities */
-        case AGENT_AVAILABLE:
-            rmw_uros_sync_session(1000);
-            _entities_ok = create_entities();
-            state = _entities_ok ? AGENT_CONNECTED : WAITING_AGENT;
-            break;
-
-        /* Normal operation: spin executor, ping every 500 ms */
-        case AGENT_CONNECTED: {
-            uint64_t now = time_us_64();
-            if (now - last_ping >= 500000u) {
-                last_ping = now;
-                if (rmw_uros_ping_agent(100, 1) != RMW_RET_OK) {
-                    state = AGENT_DISCONNECTED;
-                    break;
-                }
-            }
-            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
-            break;
-        }
-
-        /* Agent lost — tear down entities and restart discovery */
-        case AGENT_DISCONNECTED:
-            destroy_entities();
-            state = WAITING_AGENT;
-            break;
-        }
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     }
 }
