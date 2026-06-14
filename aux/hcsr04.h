@@ -13,7 +13,7 @@ typedef struct {
     volatile uint64_t start_time;
     volatile uint64_t end_time;
     volatile bool measure_done;
-    float distance;
+    volatile float distance;
 } hcsr04_t;
 
 void hcsr04_init(hcsr04_t *sensor);

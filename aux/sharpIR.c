@@ -6,7 +6,7 @@ float sharpIR_read(uint16_t* raw_out, float* voltage_out) {
     adc_select_input(IR_SENSOR_ADC_INPUT);
     uint16_t raw = adc_read();
 
-    float voltage = raw * 3.3f / 4095.0f;
+    float voltage = raw * 3.3f / 4095.0f; //Corrigir isso aqui
     float distance = (27.86f * (1.0f /voltage)) - 0.42f;
 
     if (distance < 10.0f) distance = 10.0f;
