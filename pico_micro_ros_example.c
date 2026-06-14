@@ -123,28 +123,6 @@ void timer_callback(rcl_timer_t *t, int64_t last_call_time) {
     tf_msg.transforms.data[0].transform.rotation.y    = 0.0f;
     tf_msg.transforms.data[0].transform.rotation.z    = qz;
 
-    /* TF base_link→ir_link */
-    tf_msg.transforms.data[1].header.stamp.sec     = sec;
-    tf_msg.transforms.data[1].header.stamp.nanosec = nsec;
-    tf_msg.transforms.data[1].transform.translation.x = 0.10f;
-    tf_msg.transforms.data[1].transform.translation.y = 0.0f;
-    tf_msg.transforms.data[1].transform.translation.z = 0.05f;
-    tf_msg.transforms.data[1].transform.rotation.w    = 1.0f;
-    tf_msg.transforms.data[1].transform.rotation.x    = 0.0f;
-    tf_msg.transforms.data[1].transform.rotation.y    = 0.0f;
-    tf_msg.transforms.data[1].transform.rotation.z    = 0.0f;
-
-    /* TF base_link→us_link */
-    tf_msg.transforms.data[2].header.stamp.sec     = sec;
-    tf_msg.transforms.data[2].header.stamp.nanosec = nsec;
-    tf_msg.transforms.data[2].transform.translation.x = 0.10f;
-    tf_msg.transforms.data[2].transform.translation.y = 0.0f;
-    tf_msg.transforms.data[2].transform.translation.z = 0.05f;
-    tf_msg.transforms.data[2].transform.rotation.w    = 1.0f;
-    tf_msg.transforms.data[2].transform.rotation.x    = 0.0f;
-    tf_msg.transforms.data[2].transform.rotation.y    = 0.0f;
-    tf_msg.transforms.data[2].transform.rotation.z    = 0.0f;
-
     /* IMU */
     imu_msg.header.stamp.sec     = sec;
     imu_msg.header.stamp.nanosec = nsec;
@@ -195,9 +173,12 @@ void timer_callback(rcl_timer_t *t, int64_t last_call_time) {
 
     gpio_put(LED_PIN, !gpio_get(LED_PIN));
 
-    /* Kick sensor reads for next cycle (non-blocking, complete well before next timer fire) */
+    /* Kick sensor reads for next cycle.
+       Guard with busy checks: if timer fires accumulate after a 500 ms ping block,
+       multiple rapid calls would overwrite in-flight DMA buffers and stall the bus. */
     pmw3901_read_async(&pmw3901, NULL);
-    mpu9250_read_accel_gyro_async(&mpu9250, on_ag_done, NULL);
+    if (!i2c_dma_busy())
+        mpu9250_read_accel_gyro_async(&mpu9250, on_ag_done, NULL);
 }
 
 /* ── create / destroy entities ──────────────────────────────────────────── */
@@ -227,20 +208,14 @@ static bool create_entities(void) {
 
     tf2_msgs__msg__TFMessage__init(&tf_msg);
     tf_msg.transforms.data =
-        malloc(sizeof(geometry_msgs__msg__TransformStamped) * 3);
+        malloc(sizeof(geometry_msgs__msg__TransformStamped) * 1);
     if (!tf_msg.transforms.data) { rclc_support_fini(&support); return false; }
-    tf_msg.transforms.size     = 3;
-    tf_msg.transforms.capacity = 3;
+    tf_msg.transforms.size     = 1;
+    tf_msg.transforms.capacity = 1;
 
     geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[0]);
-    geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[1]);
-    geometry_msgs__msg__TransformStamped__init(&tf_msg.transforms.data[2]);
     rosidl_runtime_c__String__assign(&tf_msg.transforms.data[0].header.frame_id, "odom");
     rosidl_runtime_c__String__assign(&tf_msg.transforms.data[0].child_frame_id,  "base_link");
-    rosidl_runtime_c__String__assign(&tf_msg.transforms.data[1].header.frame_id, "base_link");
-    rosidl_runtime_c__String__assign(&tf_msg.transforms.data[1].child_frame_id,  "ir_link");
-    rosidl_runtime_c__String__assign(&tf_msg.transforms.data[2].header.frame_id, "base_link");
-    rosidl_runtime_c__String__assign(&tf_msg.transforms.data[2].child_frame_id,  "us_link");
 
     sensor_msgs__msg__Imu__init(&imu_msg);
     rosidl_runtime_c__String__assign(&imu_msg.header.frame_id, "base_link");
@@ -249,14 +224,14 @@ static bool create_entities(void) {
     rosidl_runtime_c__String__assign(&mag_msg.header.frame_id, "base_link");
 
     sensor_msgs__msg__Range__init(&ir_msg);
-    rosidl_runtime_c__String__assign(&ir_msg.header.frame_id, "ir_link");
+    rosidl_runtime_c__String__assign(&ir_msg.header.frame_id, "base_link");
     ir_msg.radiation_type = sensor_msgs__msg__Range__INFRARED;
     ir_msg.field_of_view  = 0.26f;
     ir_msg.min_range      = 0.10f;
     ir_msg.max_range      = 0.80f;
 
     sensor_msgs__msg__Range__init(&us_msg);
-    rosidl_runtime_c__String__assign(&us_msg.header.frame_id, "us_link");
+    rosidl_runtime_c__String__assign(&us_msg.header.frame_id, "base_link");
     us_msg.radiation_type = sensor_msgs__msg__Range__ULTRASOUND;
     us_msg.field_of_view  = 0.5f;
     us_msg.min_range      = 0.02f;
@@ -312,11 +287,17 @@ int main(void) {
     sharpIR_init();
     hcsr04_init(&hcsr04);
 
-    /* PMW3901 init: blocking phase-1 writes (~15 ms) + 100 ms async alarm + phase-2 writes. */
+    /* PMW3901 init: blocking phase-1 writes (~15 ms) + 100 ms async alarm + phase-2 writes.
+       500 ms safety timeout ensures micro-ROS always starts even if the alarm fails. */
     gpio_put(LED_PIN, 1);
     pmw3901_init(NULL);
-    while (!pmw3901_init_done())
-        pmw3901_init_poll();
+    {
+        uint32_t t0 = to_ms_since_boot(get_absolute_time());
+        while (!pmw3901_init_done()) {
+            pmw3901_init_poll();
+            if (to_ms_since_boot(get_absolute_time()) - t0 > 500) break;
+        }
+    }
     gpio_put(LED_PIN, 0);
 
     rmw_uros_set_custom_transport(

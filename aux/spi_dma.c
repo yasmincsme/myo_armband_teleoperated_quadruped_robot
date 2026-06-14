@@ -9,6 +9,7 @@ static uint8_t    _dummy_rx;
 
 void spi_dma_irq_handler(void) {
     spi_dma_t *dev = _active_dev;
+    if (!dev) { dma_hw->ints0 = 0xFFFFFFFFu; return; }
     dma_channel_acknowledge_irq0(dev->ch_rx);
     while (spi_is_busy(dev->spi))
         tight_loop_contents();
