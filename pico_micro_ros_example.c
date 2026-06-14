@@ -227,8 +227,8 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     float gz = mpu9250.gyro[2];
     theta += gz * DT;
 
-    x += dx_m;
-    y += dy_m;
+    x += dx_m * cosf(theta) - dy_m * sinf(theta);
+    y += dx_m * sinf(theta) + dy_m * cosf(theta);
 
     float half = theta * 0.5f;
     float qw = cosf(half);
@@ -264,10 +264,10 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     odom_msg.pose.pose.position.y = y;
     odom_msg.pose.pose.position.z = 0.0;
 
-    odom_msg.pose.pose.orientation.w = 1.0;
+    odom_msg.pose.pose.orientation.w = qw;
     odom_msg.pose.pose.orientation.x = 0.0;
     odom_msg.pose.pose.orientation.y = 0.0;
-    odom_msg.pose.pose.orientation.z = 0.0;
+    odom_msg.pose.pose.orientation.z = qz;
 
     odom_msg.twist.twist.linear.x = vel_x;
     odom_msg.twist.twist.linear.y = vel_y;
@@ -283,10 +283,10 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     tf_msg.transforms.data[0].transform.translation.y = y;
     tf_msg.transforms.data[0].transform.translation.z = 0.0;
 
-    tf_msg.transforms.data[0].transform.rotation.w = 1.0;
+    tf_msg.transforms.data[0].transform.rotation.w = qw;
     tf_msg.transforms.data[0].transform.rotation.x = 0.0;
     tf_msg.transforms.data[0].transform.rotation.y = 0.0;
-    tf_msg.transforms.data[0].transform.rotation.z = 0.0;
+    tf_msg.transforms.data[0].transform.rotation.z = qz;
 
     //Imu
 
