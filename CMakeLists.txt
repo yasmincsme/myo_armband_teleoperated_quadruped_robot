@@ -17,6 +17,7 @@ add_executable(pico_micro_ros_example
     pico_micro_ros_example.c
     pico_uart_transport.c
     aux/spi_async.c
+    aux/i2c_dma.c
     aux/pmw3901.c
     aux/mpu9250.c
     aux/sharpIR.c

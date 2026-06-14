@@ -18,6 +18,7 @@
 #include "pico_uart_transports.h"
 #include "aux/pmw3901.h"
 #include "aux/mpu9250.h"
+#include "aux/i2c_dma.h"
 #include "aux/sharpIR.h"
 #include "aux/hcsr04.h"
 
@@ -64,8 +65,6 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     float dx_m, dy_m, vel_x, vel_y;
     pmw3901_snapshot(&dx_m, &dy_m, &vel_x, &vel_y);
 
-    mpu9250_update_values(&mpu9250);
-
     uint16_t raw;
     float voltage;
     float distance_cm = sharpIR_read(&raw, &voltage);
@@ -76,11 +75,8 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     float gz = mpu9250.gyro[2];
     theta += gz * DT;
 
-    float c = cosf(theta);
-    float s = sinf(theta);
-
-    x += dx_m * c - dy_m * s;
-    y += dx_m * s + dy_m * c;
+    x += dx_m;
+    y += dy_m;
 
     float half = theta * 0.5f;
     float qw = cosf(half);
@@ -116,13 +112,13 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     odom_msg.pose.pose.position.y = y;
     odom_msg.pose.pose.position.z = 0.0;
 
-    odom_msg.pose.pose.orientation.w = qw;
+    odom_msg.pose.pose.orientation.w = 1.0;
     odom_msg.pose.pose.orientation.x = 0.0;
     odom_msg.pose.pose.orientation.y = 0.0;
-    odom_msg.pose.pose.orientation.z = qz;
+    odom_msg.pose.pose.orientation.z = 0.0;
 
-    odom_msg.twist.twist.linear.x = dx_m / DT;
-    odom_msg.twist.twist.linear.y = dy_m / DT;
+    odom_msg.twist.twist.linear.x = vel_x;
+    odom_msg.twist.twist.linear.y = vel_y;
     odom_msg.twist.twist.linear.z = 0.0;
 
     odom_msg.twist.twist.angular.x = 0.0;
@@ -135,10 +131,10 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     tf_msg.transforms.data[0].transform.translation.y = y;
     tf_msg.transforms.data[0].transform.translation.z = 0.0;
 
-    tf_msg.transforms.data[0].transform.rotation.w = qw;
+    tf_msg.transforms.data[0].transform.rotation.w = 1.0;
     tf_msg.transforms.data[0].transform.rotation.x = 0.0;
     tf_msg.transforms.data[0].transform.rotation.y = 0.0;
-    tf_msg.transforms.data[0].transform.rotation.z = qz;
+    tf_msg.transforms.data[0].transform.rotation.z = 0.0;
 
     //Imu
 
@@ -333,6 +329,7 @@ int main(void) {
 
     /* Other sensors */
     i2c_activate();
+    i2c_dma_init(INTERFACE_I2C);
     mpu9250_init(INTERFACE_I2C);
     sharpIR_init();
     hcsr04_init(&hcsr04);
@@ -367,6 +364,10 @@ int main(void) {
         /* Service PMW3901 read chain every iteration (RESTRIÇÃO 5) */
         pmw3901_service();
 
+        /* Kick async IMU read whenever the bus is free */
+        if (!i2c_dma_busy())
+            mpu9250_read_async(&mpu9250, NULL, NULL);
+
         switch (state) {
 
         /* Poll until an agent responds */
@@ -375,8 +376,9 @@ int main(void) {
                 state = AGENT_AVAILABLE;
             break;
 
-        /* Agent seen — create all ROS entities */
+        /* Agent seen — sync time then create all ROS entities */
         case AGENT_AVAILABLE:
+            rmw_uros_sync_session(1000);
             _entities_ok = create_entities();
             state = _entities_ok ? AGENT_CONNECTED : WAITING_AGENT;
             break;

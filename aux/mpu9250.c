@@ -1,4 +1,5 @@
 #include "mpu9250.h"
+#include "i2c_dma.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -106,5 +107,58 @@ uint8_t mpu9250_update_values(mpu9250_t *data) {
     }
 
     return 1;
+}
+
+/* ── Async read chain (DMA_IRQ_1 context) ─────────────────────── */
+
+static uint8_t           _ag_buf[14];
+static uint8_t           _mag_buf[7];
+static mpu9250_t        *_async_out;
+static i2c_dma_done_cb_t _async_cb;
+static void             *_async_user;
+
+static void on_mag_done(void *u) {
+    (void)u;
+    mpu9250_t *d = _async_out;
+
+    d->mag_raw[0] = (int16_t)((_mag_buf[1] << 8) | _mag_buf[0]);
+    d->mag_raw[1] = (int16_t)((_mag_buf[3] << 8) | _mag_buf[2]);
+    d->mag_raw[2] = (int16_t)((_mag_buf[5] << 8) | _mag_buf[4]);
+
+    for (int i = 0; i < 3; i++)
+        d->mag[i] = (float)d->mag_raw[i] * MAG_SCALE - d->mag_bias[i];
+
+    if (_async_cb) _async_cb(_async_user);
+}
+
+static void on_ag_done(void *u) {
+    (void)u;
+    mpu9250_t *d = _async_out;
+
+    d->accel_raw[0] = (int16_t)((_ag_buf[0]  << 8) | _ag_buf[1]);
+    d->accel_raw[1] = (int16_t)((_ag_buf[2]  << 8) | _ag_buf[3]);
+    d->accel_raw[2] = (int16_t)((_ag_buf[4]  << 8) | _ag_buf[5]);
+    d->gyro_raw[0]  = (int16_t)((_ag_buf[8]  << 8) | _ag_buf[9]);
+    d->gyro_raw[1]  = (int16_t)((_ag_buf[10] << 8) | _ag_buf[11]);
+    d->gyro_raw[2]  = (int16_t)((_ag_buf[12] << 8) | _ag_buf[13]);
+
+    const float g = 9.80665f;
+    for (int i = 0; i < 3; i++) {
+        d->accel[i] = ((float)d->accel_raw[i] / ACCEL_SCALE_4G) * g
+                      - d->accel_bias[i];
+        d->gyro[i]  = ((float)d->gyro_raw[i] / GYRO_SCALE_500DPS)
+                      * (M_PI / 180.0f) - d->gyro_bias[i];
+    }
+
+    /* Wait for STOP before issuing the next transaction. */
+    i2c_dma_wait_idle();
+    i2c_dma_read(AK8963_ADDR, AK8963_HXL, _mag_buf, 7, on_mag_done, NULL);
+}
+
+void mpu9250_read_async(mpu9250_t *out, i2c_dma_done_cb_t cb, void *user) {
+    _async_out  = out;
+    _async_cb   = cb;
+    _async_user = user;
+    i2c_dma_read(MPU6500_ADDR, REG_ACCEL_XOUT_H, _ag_buf, 14, on_ag_done, NULL);
 }
 

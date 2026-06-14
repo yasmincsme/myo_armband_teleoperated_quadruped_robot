@@ -13,5 +13,6 @@ void spi_async_init (spi_inst_t *spi, uint pin_miso, uint pin_mosi,
 void spi_async_read (uint8_t reg, spi_done_cb_t cb, void *user);
 void spi_async_write(uint8_t reg, uint8_t val, spi_done_cb_t cb, void *user);
 bool spi_async_busy (void);
+void spi_async_abort(void);
 
 #endif

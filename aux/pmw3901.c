@@ -100,6 +100,8 @@ static volatile bool  _read_chain_busy = false;
 static volatile bool  _ready           = false;
 
 static absolute_time_t _last_read_ts;
+static uint64_t        _chain_start_us = 0;
+#define CHAIN_TIMEOUT_US 200000u
 
 /* read chain intermediates — written only from alarm IRQ */
 static uint8_t _rd_dxL, _rd_dxH;
@@ -294,9 +296,17 @@ void pmw3901_init(pmw3901_done_cb_t on_done) {
 bool pmw3901_ready(void) { return _ready; }
 
 void pmw3901_service(void) {
-    if (_mot_pending && !_read_chain_busy) {
+    if (_read_chain_busy) {
+        if (time_us_64() - _chain_start_us > CHAIN_TIMEOUT_US) {
+            spi_async_abort();
+            _read_chain_busy = false;
+        }
+        return;
+    }
+    if (_mot_pending) {
         _mot_pending     = false;
         _read_chain_busy = true;
+        _chain_start_us  = time_us_64();
         spi_async_read(REG_MOTION, rd_done_motion, NULL);
     }
 }

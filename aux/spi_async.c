@@ -76,7 +76,16 @@ static int64_t alarm_tsww(alarm_id_t id, void *u) {
 static void dma_irq_handler(void) {
     if (!dma_channel_get_irq0_status(_ch_rx)) return;
     dma_channel_acknowledge_irq0(_ch_rx);
-    while (spi_is_busy(_spi)) tight_loop_contents();
+
+    uint64_t t0 = time_us_64();
+    while (spi_is_busy(_spi)) {
+        if (time_us_64() - t0 > 100u) {
+            gpio_put(_cs_pin, 1);
+            _state = ST_IDLE;
+            _cb    = NULL;
+            return;
+        }
+    }
 
     switch (_state) {
     case ST_TX_ADDR:
@@ -147,3 +156,13 @@ void spi_async_write(uint8_t reg, uint8_t val, spi_done_cb_t cb, void *user) {
 }
 
 bool spi_async_busy(void) { return _state != ST_IDLE; }
+
+void spi_async_abort(void) {
+    dma_channel_abort(_ch_tx);
+    dma_channel_abort(_ch_rx);
+    dma_channel_acknowledge_irq0(_ch_rx);
+    dma_channel_acknowledge_irq0(_ch_tx);
+    gpio_put(_cs_pin, 1);
+    _state = ST_IDLE;
+    _cb    = NULL;
+}
