@@ -8,11 +8,12 @@
 #define PMW_SCALE  (1.0f / 2100.0f)
 #define SQUAL_MIN  20
 
-/* SPI pin mapping (Pico 2) */
+/* SPI + control pin mapping (Pico 2) */
 #define PIN_MISO   16
 #define PIN_MOSI   19
 #define PIN_SCK    18
 #define PIN_CS     17
+#define PIN_RESET  20
 
 typedef void (*pmw3901_done_cb_t)(bool ok);
 

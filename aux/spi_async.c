@@ -77,16 +77,9 @@ static void dma_irq_handler(void) {
     if (!dma_channel_get_irq0_status(_ch_rx)) return;
     dma_channel_acknowledge_irq0(_ch_rx);
 
-    uint64_t t0 = time_us_64();
-    while (spi_is_busy(_spi)) {
-        if (time_us_64() - t0 > 100u) {
-            gpio_put(_cs_pin, 1);
-            _state = ST_IDLE;
-            _cb    = NULL;
-            return;
-        }
-    }
-
+    /* RX DMA completion guarantees SPI shift register is done:
+       in full-duplex SPI, a byte appears in RX FIFO only after the
+       corresponding TX clock cycle completes — no spin needed. */
     switch (_state) {
     case ST_TX_ADDR:
         _state = ST_WAIT_TSRAD;
