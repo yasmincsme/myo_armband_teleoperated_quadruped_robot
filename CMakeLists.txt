@@ -16,6 +16,7 @@ link_directories(libmicroros)
 add_executable(pico_micro_ros_example
     pico_micro_ros_example.c
     pico_uart_transport.c
+    aux/spi_async.c
     aux/pmw3901.c
     aux/mpu9250.c
     aux/sharpIR.c
@@ -28,6 +29,8 @@ target_link_libraries(pico_micro_ros_example
     hardware_spi
     hardware_i2c
     hardware_adc
+    hardware_dma
+    hardware_irq
 )
 
 target_include_directories(pico_micro_ros_example PUBLIC
