@@ -15,6 +15,7 @@
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/magnetic_field.h>
 #include <sensor_msgs/msg/range.h>
+#include <std_msgs/msg/u_int32.h>
 
 #include "pico_uart_transports.h"
 #include "hardware/uart.h"
@@ -41,6 +42,7 @@ static rcl_timer_t      ros_timer;
 static rclc_executor_t  executor;
 
 static rcl_publisher_t  odom_pub, tf_pub, imu_pub, mag_pub, ir_pub, us_pub, fused_pub;
+static rcl_publisher_t  teleop_lat_pub, obstacle_lat_pub;
 static rcl_subscription_t        cmd_vel_sub;
 
 static nav_msgs__msg__Odometry         odom_msg;
@@ -49,6 +51,7 @@ static sensor_msgs__msg__Imu           imu_msg;
 static sensor_msgs__msg__MagneticField mag_msg;
 static sensor_msgs__msg__Range         ir_msg, us_msg, fused_msg;
 static geometry_msgs__msg__Twist       cmd_vel_msg;
+static std_msgs__msg__UInt32           teleop_lat_msg, obstacle_lat_msg;
 
 /* ── SSC-32 servo controller (UART0 / GPIO 0=TX, 1=RX) ───────── */
 #define SSC_UART      uart1
@@ -115,6 +118,12 @@ static gait_fsm_t             _gait_fsm  = GAIT_IDLE;
 static int                    _gait_step = 0;
 static uint64_t               _last_q_us = 0;
 
+/* ── Latency measurement ──────────────────────────────────────── */
+static volatile uint32_t _teleop_latency_us  = 0;
+static volatile uint64_t _obs_start_us        = 0;
+static volatile bool     _obs_measuring        = false;
+static volatile uint32_t _obstacle_latency_us  = 0;
+
 /* ── Kalman filter state for IR + sonar fusion ────────────────── */
 #define KF_Q          0.001f  /* process noise variance (m²)                  */
 #define KF_R_IR_NEAR  0.003f  /* IR noise at close range  → more trusted      */
@@ -169,6 +178,10 @@ static void gait_service(void) {
         /* Move complete — check obstacle before advancing */
         if (_kf_x <= OBSTACLE_M) {
             ssc_send(REST_CMD);
+            if (_obs_measuring) {
+                _obstacle_latency_us = (uint32_t)(time_us_64() - _obs_start_us);
+                _obs_measuring = false;
+            }
             _gait_fsm = GAIT_IDLE;
             _motion   = MOTION_NONE;
         } else {
@@ -196,6 +209,8 @@ static void cmd_vel_callback(const void *msgin) {
 
     if (m == _motion) return;
 
+    uint64_t _t0 = time_us_64();
+
     _motion    = m;
     _gait_step = 0;
     if (m == MOTION_NONE) {
@@ -206,6 +221,8 @@ static void cmd_vel_callback(const void *msgin) {
         _last_q_us = time_us_64();
         _gait_fsm  = GAIT_MOVING;
     }
+
+    _teleop_latency_us = (uint32_t)(time_us_64() - _t0);
 }
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
@@ -357,15 +374,30 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     fused_msg.header.stamp.nanosec = nsec;
     fused_msg.range = _kf_x;
 
+    /* Marca o instante em que x̂ cruza o limiar pela primeira vez */
+    if (_kf_x <= OBSTACLE_M) {
+        if (!_obs_measuring) {
+            _obs_start_us  = time_us_64();
+            _obs_measuring = true;
+        }
+    } else {
+        _obs_measuring = false;
+    }
+
     //
 
-    rcl_publish(&tf_pub,    &tf_msg,    NULL);
-    rcl_publish(&odom_pub,  &odom_msg,  NULL);
-    rcl_publish(&imu_pub,   &imu_msg,   NULL);
-    rcl_publish(&mag_pub,   &mag_msg,   NULL);
-    rcl_publish(&ir_pub,    &ir_msg,    NULL);
-    rcl_publish(&us_pub,    &us_msg,    NULL);
-    rcl_publish(&fused_pub, &fused_msg, NULL);
+    teleop_lat_msg.data   = _teleop_latency_us;
+    obstacle_lat_msg.data = _obstacle_latency_us;
+
+    rcl_publish(&tf_pub,           &tf_msg,           NULL);
+    rcl_publish(&odom_pub,         &odom_msg,         NULL);
+    rcl_publish(&imu_pub,          &imu_msg,          NULL);
+    rcl_publish(&mag_pub,          &mag_msg,          NULL);
+    rcl_publish(&ir_pub,           &ir_msg,           NULL);
+    rcl_publish(&us_pub,           &us_msg,           NULL);
+    rcl_publish(&fused_pub,        &fused_msg,        NULL);
+    rcl_publish(&teleop_lat_pub,   &teleop_lat_msg,   NULL);
+    rcl_publish(&obstacle_lat_pub, &obstacle_lat_msg, NULL);
 
     gpio_put(LED_PIN, !gpio_get(LED_PIN));
 }
@@ -386,14 +418,19 @@ static bool create_entities(void) {
     rclc_publisher_init_default(&(pub), &node, \
         ROSIDL_GET_MSG_TYPE_SUPPORT(pkg, mod, type), topic)
 
-    MKPUB(odom_pub, nav_msgs,    msg, Odometry,     "odom");
-    MKPUB(tf_pub,   tf2_msgs,    msg, TFMessage,    "/tf");
-    MKPUB(imu_pub,  sensor_msgs, msg, Imu,          "imu/data");
-    MKPUB(mag_pub,  sensor_msgs, msg, MagneticField, "imu/mag");
-    MKPUB(ir_pub,    sensor_msgs, msg, Range, "ir_range");
-    MKPUB(us_pub,    sensor_msgs, msg, Range, "us_range");
-    MKPUB(fused_pub, sensor_msgs, msg, Range, "fused_range");
+    MKPUB(odom_pub,         nav_msgs,    msg, Odometry,      "odom");
+    MKPUB(tf_pub,           tf2_msgs,    msg, TFMessage,     "/tf");
+    MKPUB(imu_pub,          sensor_msgs, msg, Imu,           "imu/data");
+    MKPUB(mag_pub,          sensor_msgs, msg, MagneticField, "imu/mag");
+    MKPUB(ir_pub,           sensor_msgs, msg, Range,         "ir_range");
+    MKPUB(us_pub,           sensor_msgs, msg, Range,         "us_range");
+    MKPUB(fused_pub,        sensor_msgs, msg, Range,         "fused_range");
+    MKPUB(teleop_lat_pub,   std_msgs,    msg, UInt32,        "teleop_latency_us");
+    MKPUB(obstacle_lat_pub, std_msgs,    msg, UInt32,        "obstacle_latency_us");
 #undef MKPUB
+
+    std_msgs__msg__UInt32__init(&teleop_lat_msg);
+    std_msgs__msg__UInt32__init(&obstacle_lat_msg);
 
     /* Odometry */
     nav_msgs__msg__Odometry__init(&odom_msg);
