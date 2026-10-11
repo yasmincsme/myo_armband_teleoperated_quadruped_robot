@@ -3,6 +3,7 @@
 
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
+#include "i2c_dma.h"
 
 extern i2c_inst_t *i2c_port;
 
@@ -62,6 +63,9 @@ void i2c_activate();
 uint8_t i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val);
 uint8_t i2c_read_bytes(uint8_t addr, uint8_t reg, uint8_t *buf, uint8_t len);
 uint8_t mpu9250_init(i2c_inst_t *i2c);
-uint8_t mpu9250_update_values(mpu9250_t *data) ;
+uint8_t mpu9250_update_values(mpu9250_t *data);
+
+/* Non-blocking read: accel/gyro → (chain) → mag. cb is called from DMA_IRQ_1. */
+void mpu9250_read_async(mpu9250_t *out, i2c_dma_done_cb_t cb, void *user);
 
 #endif
