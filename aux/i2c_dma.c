@@ -31,6 +31,7 @@ static int                _ch_tx, _ch_rx;
 
 static uint16_t           _cmd_buf[MAX_LEN + 1]; /* write + N reads */
 static volatile bool      _busy = false;
+static volatile uint64_t  _start_us = 0;
 static i2c_dma_done_cb_t  _done_cb;
 static void               *_done_user;
 
@@ -62,10 +63,35 @@ void i2c_dma_init(i2c_inst_t *i2c) {
 
 bool i2c_dma_busy(void) { return _busy; }
 
-void i2c_dma_wait_idle(void) {
-    /* Spin until the I2C master finishes generating the STOP condition (~10 µs at 100 kHz). */
-    while (i2c_get_hw(_i2c)->status & I2C_IC_STATUS_ACTIVITY_BITS)
+bool i2c_dma_stalled(uint32_t timeout_us) {
+    return _busy && (time_us_64() - _start_us) > timeout_us;
+}
+
+volatile uint32_t i2c_dma_abort_count = 0;
+
+void i2c_dma_abort(void) {
+    i2c_dma_abort_count++;
+    dma_channel_abort(_ch_tx);
+    dma_channel_abort(_ch_rx);
+    dma_channel_acknowledge_irq1(_ch_rx);
+
+    /* Cycle the peripheral to clear a half-finished transaction. */
+    i2c_get_hw(_i2c)->enable = 0;
+    i2c_get_hw(_i2c)->enable = 1;
+
+    _done_cb = NULL;
+    _busy    = false;
+}
+
+bool i2c_dma_wait_idle(void) {
+    /* STOP takes ~10 µs at 100 kHz; anything beyond 1 ms means a stuck bus. */
+    uint64_t start = time_us_64();
+    while (i2c_get_hw(_i2c)->status & I2C_IC_STATUS_ACTIVITY_BITS) {
+        if (time_us_64() - start > 1000u)
+            return false;
         tight_loop_contents();
+    }
+    return true;
 }
 
 void i2c_dma_read(uint8_t addr, uint8_t reg,
@@ -74,6 +100,7 @@ void i2c_dma_read(uint8_t addr, uint8_t reg,
     _done_cb   = cb;
     _done_user = user;
     _busy      = true;
+    _start_us  = time_us_64();
 
     /* Reconfigure I2C target address (disable → set → enable flushes FIFOs). */
     i2c_get_hw(_i2c)->enable = 0;

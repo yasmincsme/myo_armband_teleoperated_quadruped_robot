@@ -6,8 +6,8 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 
-#define HCSR04_TRIG_PIN 12
-#define HCSR04_ECHO_PIN 13
+#define HCSR04_TRIG_PIN 13
+#define HCSR04_ECHO_PIN 2
 
 typedef struct {
     volatile uint64_t start_time;
