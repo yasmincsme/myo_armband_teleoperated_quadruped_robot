@@ -27,9 +27,31 @@
 #define LED_PIN  25
 #define DT       0.05f
 
+/* ── TESTE ESTRATÉGICO: ativação de sensores por partes ───────────
+   Mude cada flag para 1 para religar aquele sensor/periférico. Tudo
+   começa em 0 (só a comunicação com o host roda). Religue um de cada
+   vez, recompile, grave, confirme estabilidade, e só então ligue o
+   próximo. */
+#ifndef ENABLE_PMW3901
+#define ENABLE_PMW3901 1
+#endif
+#ifndef ENABLE_MPU9250
+#define ENABLE_MPU9250 0   /* sensor queimado */
+#endif
+#ifndef ENABLE_SHARPIR
+#define ENABLE_SHARPIR 1
+#endif
+#ifndef ENABLE_HCSR04
+#define ENABLE_HCSR04 1
+#endif
+#ifndef ENABLE_SSC32
+#define ENABLE_SSC32 1
+#endif
+
 /* ── Hardware objects ─────────────────────────────────────────── */
 static mpu9250_t mpu9250;
 static hcsr04_t  hcsr04;
+
 
 float x = 0.0f, y = 0.0f, theta = 0.0f;
 
@@ -50,7 +72,20 @@ static sensor_msgs__msg__MagneticField mag_msg;
 static sensor_msgs__msg__Range         ir_msg, us_msg, fused_msg;
 static geometry_msgs__msg__Twist       cmd_vel_msg;
 
-/* ── SSC-32 servo controller (UART0 / GPIO 0=TX, 1=RX) ───────── */
+/* ── Kalman filter state for IR + sonar fusion ────────────────── */
+#define KF_Q          0.001f  /* process noise variance (m²)                  */
+#define KF_R_IR_NEAR  0.003f  /* IR noise at close range  → more trusted      */
+#define KF_R_IR_FAR   0.020f  /* IR noise at far range    → less trusted      */
+#define KF_R_US_NEAR  0.020f  /* sonar noise at close range → less trusted    */
+#define KF_R_US_FAR   0.003f  /* sonar noise at far range   → more trusted    */
+static float _kf_x = 0.5f;   /* state estimate (m)                            */
+static float _kf_P = 1.0f;   /* error covariance                              */
+
+#if ENABLE_SSC32
+/* ── SSC-32 servo controller (UART1 / GPIO 8=TX, 9=RX) ─────────
+   Leg channel map: coxa / femur / tibia
+     A = 26 / 27 / 28     B = 21 / 20 / 19
+     C = 10 / 11 / 12     D =  5 /  4 /  3                        */
 #define SSC_UART      uart1
 #define SSC_TX_PIN    8
 #define SSC_RX_PIN    9
@@ -59,52 +94,56 @@ static geometry_msgs__msg__Twist       cmd_vel_msg;
 #define GAIT_QUERY_US 20000u
 
 static const char REST_CMD[] =
-    "#0 P1200 #1 P1100 #2 P1100 "
-    "#14 P1800 #13 P1800 #12 P2000 "
-    "#16 P1800 #17 P1800 #18 P1900 "
-    "#30 P1300 #29 P1300 #28 P1000 T200";
+    "#28 P1200 #27 P1300 #26 P1200 "
+    "#21 P2000 #20 P1300 #19 P1250 "
+    "#10 P1800 #11 P1700 #12 P1900 "
+    "#5 P1000 #4 P1600 #3 P1700 T100";
 
 #define GAIT_FWD_N   10
 #define GAIT_LEFT_N  10
 #define GAIT_RIGHT_N 10
 
+/* Leg order D, C, body shift, B, A, body shift */
 static const char *GAIT_FWD[GAIT_FWD_N] = {
-    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1400 #30 P1700 #29 P1400 #28 P900 T200",
-    "#30 P1300 #29 P1100 #28 P1600 T100",
-    "#30 P1300 #29 P1300 #28 P1600 T100",
-    "#16 P1800 #17 P2000 #18 P1900 T100",
-    "#16 P1600 #17 P1800 #18 P2000 T100",
-    "#0 P1200 #1 P1100 #2 P1600 #14 P1600 #13 P1700 #12 P2100 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
-    "#14 P1800 #13 P2000 #12 P1500 T100",
-    "#14 P1800 #13 P1700 #12 P1500 T100",
-    "#0 P1300 #1 P1000 #2 P1000 T100",
-    "#0 P1500 #1 P1200 #2 P900 T100",
+    "#28 P1200 #27 P1300 #26 P1200 #21 P2000 #20 P1300 #19 P1250 #10 P1500 #11 P1700 #12 P1900 #5 P800 #4 P1600 #3 P1700 T100",
+    "#5 P1500 #4 P1800 #3 P1700 T100",
+    "#5 P1500 #4 P1600 #3 P1700 T100",
+    "#10 P2000 #11 P1900 #12 P1900 T100",
+    "#10 P2000 #11 P1700 #12 P1800 T100",
+    "#26 P1500 #27 P1300 #28 P1200 #21 P2100 #20 P1300 #19 P1250 #10 P1800 #11 P1700 #12 P1900 #5 P1000 #4 P1600 #3 P1700 T100",
+    "#21 P1500 #20 P1100 #19 P1250 T100",
+    "#21 P1500 #20 P1300 #19 P1250 T100",
+    "#26 P1000 #27 P1100 #28 P1200 T100",
+    "#26 P1000 #27 P1300 #28 P1200 T100",
 };
 
+/* Turn-in-place: same leg order as the creep gait, but every coxa swings the
+   same way on the servo (mirrored sides => the body rotates). The PC code's
+   TURN_AMP=250 offset is pre-applied here: +250 for left, -250 for right. */
 static const char *GAIT_LEFT[GAIT_LEFT_N] = {
-    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
-    "#30 P1300 #29 P1100 #28 P1600 T100",
-    "#30 P1300 #29 P1300 #28 P1600 T100",
-    "#0 P1200 #1 P1000 #2 P1600 T100",
-    "#0 P1200 #1 P1200 #2 P1600 T100",
-    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
-    "#16 P1800 #17 P2000 #18 P2200 T100",
-    "#16 P1800 #17 P1800 #18 P2200 T100",
-    "#14 P1800 #13 P2000 #12 P2300 T100",
-    "#14 P1800 #13 P1700 #12 P2300 T100",
+    "#5 P1250 #4 P1800 #3 P1700 T100",
+    "#5 P1250 #4 P1600 #3 P1700 T100",
+    "#10 P2050 #11 P1900 #12 P1900 T100",
+    "#10 P2050 #11 P1700 #12 P1900 T100",
+    "#26 P950 #27 P1300 #28 P1200 #21 P1750 #20 P1300 #19 P1250 #10 P1800 #11 P1700 #12 P1900 #5 P1000 #4 P1600 #3 P1700 T100",
+    "#21 P2250 #20 P1100 #19 P1250 T100",
+    "#21 P2250 #20 P1300 #19 P1250 T100",
+    "#26 P1450 #27 P1100 #28 P1200 T100",
+    "#26 P1450 #27 P1300 #28 P1200 T100",
+    "#26 P1200 #27 P1300 #28 P1200 #21 P2000 #20 P1300 #19 P1250 #10 P1550 #11 P1700 #12 P1900 #5 P750 #4 P1600 #3 P1700 T100",
 };
 
 static const char *GAIT_RIGHT[GAIT_RIGHT_N] = {
-    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
-    "#30 P1300 #29 P1100 #28 P700 T100",
-    "#30 P1300 #29 P1300 #28 P700 T100",
-    "#0 P1200 #1 P1000 #2 P800 T100",
-    "#0 P1200 #1 P1200 #2 P800 T100",
-    "#0 P1200 #1 P1100 #2 P1100 #14 P1800 #13 P1700 #12 P2000 #16 P1800 #17 P1800 #18 P1900 #30 P1300 #29 P1300 #28 P1000 T200",
-    "#16 P1800 #17 P2000 #18 P1400 T100",
-    "#16 P1800 #17 P1800 #18 P1400 T100",
-    "#14 P1800 #13 P2000 #12 P1500 T100",
-    "#14 P1800 #13 P1700 #12 P1500 T100",
+    "#5 P750 #4 P1800 #3 P1700 T100",
+    "#5 P750 #4 P1600 #3 P1700 T100",
+    "#10 P1550 #11 P1900 #12 P1900 T100",
+    "#10 P1550 #11 P1700 #12 P1900 T100",
+    "#26 P1450 #27 P1300 #28 P1200 #21 P2250 #20 P1300 #19 P1250 #10 P1800 #11 P1700 #12 P1900 #5 P1000 #4 P1600 #3 P1700 T100",
+    "#21 P1750 #20 P1100 #19 P1250 T100",
+    "#21 P1750 #20 P1300 #19 P1250 T100",
+    "#26 P950 #27 P1100 #28 P1200 T100",
+    "#26 P950 #27 P1300 #28 P1200 T100",
+    "#26 P1200 #27 P1300 #28 P1200 #21 P2000 #20 P1300 #19 P1250 #10 P2050 #11 P1700 #12 P1900 #5 P1250 #4 P1600 #3 P1700 T100",
 };
 
 typedef enum { MOTION_NONE, MOTION_FORWARD, MOTION_LEFT, MOTION_RIGHT } motion_mode_t;
@@ -114,15 +153,6 @@ static volatile motion_mode_t _motion    = MOTION_NONE;
 static gait_fsm_t             _gait_fsm  = GAIT_IDLE;
 static int                    _gait_step = 0;
 static uint64_t               _last_q_us = 0;
-
-/* ── Kalman filter state for IR + sonar fusion ────────────────── */
-#define KF_Q          0.001f  /* process noise variance (m²)                  */
-#define KF_R_IR_NEAR  0.003f  /* IR noise at close range  → more trusted      */
-#define KF_R_IR_FAR   0.020f  /* IR noise at far range    → less trusted      */
-#define KF_R_US_NEAR  0.020f  /* sonar noise at close range → less trusted    */
-#define KF_R_US_FAR   0.003f  /* sonar noise at far range   → more trusted    */
-static float _kf_x = 0.5f;   /* state estimate (m)                            */
-static float _kf_P = 1.0f;   /* error covariance                              */
 
 /* ── SSC-32 helpers ───────────────────────────────────────────── */
 static void ssc_send(const char *cmd) {
@@ -180,8 +210,10 @@ static void gait_service(void) {
     }
     /* other chars (echoes, CR/LF): ignore */
 }
+#endif /* ENABLE_SSC32 */
 
 static void cmd_vel_callback(const void *msgin) {
+#if ENABLE_SSC32
     const geometry_msgs__msg__Twist *msg = msgin;
     float lx = msg->linear.x;
     float az = msg->angular.z;
@@ -206,25 +238,39 @@ static void cmd_vel_callback(const void *msgin) {
         _last_q_us = time_us_64();
         _gait_fsm  = GAIT_MOVING;
     }
+#else
+    /* SSC-32 desligada: apenas recebe a mensagem, sem tocar na UART. */
+    (void)msgin;
+#endif
 }
 
 void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     (void)last_call_time;
     if (timer == NULL) return;
 
-    /* Snapshot atômico do PMW3901 — devolve deslocamento acumulado
-       desde a última chamada (em frame do corpo) e reseta o acumulador. */
-    float dx_m, dy_m, vel_x, vel_y;
+    /* Sensores desligados publicam valores neutros/fora-de-alcance, para o
+       Kalman simplesmente ignorar aquela fonte em vez de tratar 0 como uma
+       leitura válida. */
+    float dx_m = 0.0f, dy_m = 0.0f, vel_x = 0.0f, vel_y = 0.0f;
+#if ENABLE_PMW3901
     pmw3901_snapshot(&dx_m, &dy_m, &vel_x, &vel_y);
+#endif
 
+    float distance_m = 100.0f;
+#if ENABLE_SHARPIR
     uint16_t raw;
     float voltage;
     float distance_cm = sharpIR_read(&raw, &voltage);
-    float distance_m = distance_cm / 100.0f;
+    distance_m = distance_cm / 100.0f;
+#endif
 
     //
 
+#if ENABLE_MPU9250
     float gz = mpu9250.gyro[2];
+#else
+    float gz = 0.0f;
+#endif
     theta += gz * DT;
 
     x += dx_m * cosf(theta) - dy_m * sinf(theta);
@@ -290,6 +336,7 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
 
     //Imu
 
+#if ENABLE_MPU9250
     imu_msg.linear_acceleration.x = mpu9250.accel[0];
     imu_msg.linear_acceleration.y = mpu9250.accel[1];
     imu_msg.linear_acceleration.z = mpu9250.accel[2];
@@ -297,6 +344,15 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     imu_msg.angular_velocity.x = mpu9250.gyro[0];
     imu_msg.angular_velocity.y = mpu9250.gyro[1];
     imu_msg.angular_velocity.z = mpu9250.gyro[2];
+#else
+    imu_msg.linear_acceleration.x = 0.0;
+    imu_msg.linear_acceleration.y = 0.0;
+    imu_msg.linear_acceleration.z = 0.0;
+
+    imu_msg.angular_velocity.x = 0.0;
+    imu_msg.angular_velocity.y = 0.0;
+    imu_msg.angular_velocity.z = gz;
+#endif
 
     imu_msg.orientation.w = qw;
     imu_msg.orientation.x = 0.0;
@@ -313,6 +369,7 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
     imu_msg.orientation_covariance[4] = 0.01;
     imu_msg.orientation_covariance[8] = 0.01;
 
+
     imu_msg.angular_velocity_covariance[0] = 0.01;
     imu_msg.angular_velocity_covariance[4] = 0.01;
     imu_msg.angular_velocity_covariance[8] = 0.01;
@@ -323,13 +380,23 @@ void timer_callback(rcl_timer_t *timer, int64_t last_call_time) {
 
     //Mag
 
+#if ENABLE_MPU9250
     mag_msg.magnetic_field.x = mpu9250.mag[0];
     mag_msg.magnetic_field.y = mpu9250.mag[1];
     mag_msg.magnetic_field.z = mpu9250.mag[2];
+#else
+    mag_msg.magnetic_field.x = 0.0;
+    mag_msg.magnetic_field.y = 0.0;
+    mag_msg.magnetic_field.z = 0.0;
+#endif
 
     //Range
 
+#if ENABLE_HCSR04
     float us_m = hcsr04.distance / 100.0f;
+#else
+    float us_m = 100.0f; /* fora de alcance → Kalman ignora */
+#endif
     ir_msg.range = distance_m;
     us_msg.range = us_m;
 
@@ -468,6 +535,7 @@ static bool create_entities(void) {
     return true;
 }
 
+#if ENABLE_PMW3901
 /* ── PMW3901 bringup callback ─────────────────────────────────── */
 static volatile bool _pmw_failed = false;
 
@@ -478,6 +546,7 @@ static void on_pmw_done(bool ok) {
     }
     gpio_put(LED_PIN, 1);  /* solid ON: sensor ready */
 }
+#endif /* ENABLE_PMW3901 */
 
 /* ── Main ─────────────────────────────────────────────────────── */
 int main(void) {
@@ -486,22 +555,32 @@ int main(void) {
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
 
+#if ENABLE_PMW3901
     /* PMW3901 async bringup (starts SPI + DMA, non-blocking) */
     pmw3901_init(on_pmw_done);
+#endif
 
-    /* Other sensors */
+#if ENABLE_MPU9250
     i2c_activate();
     i2c_dma_init(INTERFACE_I2C);
     mpu9250_init(INTERFACE_I2C);
+#endif
+#if ENABLE_SHARPIR
     sharpIR_init();
+#endif
+#if ENABLE_HCSR04
     hcsr04_init(&hcsr04);
+#endif
 
+#if ENABLE_SSC32
     /* SSC-32 servo controller */
     uart_init(SSC_UART, SSC_BAUD);
     gpio_set_function(SSC_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(SSC_RX_PIN, GPIO_FUNC_UART);
     ssc_send(REST_CMD);
+#endif
 
+#if ENABLE_PMW3901
     /* Wait for PMW3901 bringup to complete (interrupts do the work) */
     uint32_t t0 = to_ms_since_boot(get_absolute_time());
     while (!pmw3901_ready()) {
@@ -515,8 +594,9 @@ int main(void) {
         }
         tight_loop_contents();
     }
+#endif
 
-    /* micro-ROS transport */
+    /* ── Rotina de comunicação com o host ROS2 (NÃO comentada) ──── */
     rmw_uros_set_custom_transport(
         true, NULL,
         pico_serial_transport_open,
@@ -525,14 +605,30 @@ int main(void) {
         pico_serial_transport_read
     );
 
-    rmw_uros_sync_session(1000);
     create_entities();
 
+    /* Must come AFTER create_entities(): the time sync needs the XRCE session
+       that rclc_support_init() establishes. Called before it, the sync fails
+       and rmw_uros_epoch_nanos() returns time since boot, which makes RViz
+       drop every message as older than its transform cache. */
+    rmw_uros_sync_session(1000);
+
     while (1) {
+#if ENABLE_PMW3901
         pmw3901_service();
+#endif
+#if ENABLE_SSC32
         gait_service();
+#endif
+#if ENABLE_MPU9250
+        /* 14 bytes at 100 kHz take ~1.4 ms; 5 ms means the slave never ACKed
+           and the completion IRQ will never arrive. Abort so the chain can be
+           rearmed, instead of staying busy forever and freezing the readings. */
+        if (i2c_dma_stalled(5000))
+            i2c_dma_abort();
         if (!i2c_dma_busy())
             mpu9250_read_async(&mpu9250, NULL, NULL);
+#endif
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     }
 }

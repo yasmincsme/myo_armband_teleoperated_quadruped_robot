@@ -3,6 +3,10 @@
 #include "pico/stdlib.h"
 #include <uxr/client/profile/transport/custom/custom_transport.h>
 
+/* micro-ROS agent link (host comms) — USB CDC, to the Raspberry Pi that
+   powers the Pico and hosts the agent. The SSC-32 servo controller uses
+   uart1/GPIO 8-9 separately (see SSC_UART in pico_micro_ros_example.c). */
+
 void usleep(uint64_t us)
 {
     sleep_us(us);

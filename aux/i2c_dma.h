@@ -14,8 +14,24 @@ void i2c_dma_init(i2c_inst_t *i2c);
 
 bool i2c_dma_busy(void);
 
-/* Spin-wait for STOP condition to finish. Safe to call from IRQ between chained reads. */
-void i2c_dma_wait_idle(void);
+/*
+ * True when a transfer has been in flight longer than timeout_us. A slave that
+ * never ACKs leaves the RX DMA unfinished, so the completion IRQ never fires
+ * and _busy would otherwise stay set forever, permanently stalling the chain.
+ */
+bool i2c_dma_stalled(uint32_t timeout_us);
+
+/* Abort an in-flight transfer and return the peripheral to a usable state. */
+void i2c_dma_abort(void);
+
+/* Diagnostic: how many transfers have been aborted by the stall watchdog. */
+extern volatile uint32_t i2c_dma_abort_count;
+
+/*
+ * Bounded spin-wait for the STOP condition. Returns false on timeout. Called
+ * from IRQ context between chained reads, so it must never spin unbounded.
+ */
+bool i2c_dma_wait_idle(void);
 
 /*
  * Non-blocking I2C read: write `reg` to slave `addr`, repeated-start, read `len` bytes.

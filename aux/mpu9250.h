@@ -10,7 +10,7 @@ extern i2c_inst_t *i2c_port;
 #define MPU6500_ADDR 0x68
 #define AK8963_ADDR  0x0C
 
-#define INTERFACE_I2C i2c0 
+#define INTERFACE_I2C i2c0
 #define PIN_SDA       4
 #define PIN_SCL       5
 #define BAUDRATE_I2C  100000
@@ -67,5 +67,8 @@ uint8_t mpu9250_update_values(mpu9250_t *data);
 
 /* Non-blocking read: accel/gyro → (chain) → mag. cb is called from DMA_IRQ_1. */
 void mpu9250_read_async(mpu9250_t *out, i2c_dma_done_cb_t cb, void *user);
+
+/* Diagnostic: incremented every time an accel/gyro DMA read completes. */
+extern volatile uint32_t mpu9250_ag_ok_count;
 
 #endif

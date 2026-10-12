@@ -131,9 +131,13 @@ static void on_mag_done(void *u) {
     if (_async_cb) _async_cb(_async_user);
 }
 
+volatile uint32_t mpu9250_ag_ok_count = 0;
+
 static void on_ag_done(void *u) {
     (void)u;
     mpu9250_t *d = _async_out;
+
+    mpu9250_ag_ok_count++;
 
     d->accel_raw[0] = (int16_t)((_ag_buf[0]  << 8) | _ag_buf[1]);
     d->accel_raw[1] = (int16_t)((_ag_buf[2]  << 8) | _ag_buf[3]);
@@ -150,8 +154,11 @@ static void on_ag_done(void *u) {
                       * (M_PI / 180.0f) - d->gyro_bias[i];
     }
 
-    /* Wait for STOP before issuing the next transaction. */
-    i2c_dma_wait_idle();
+    /* Wait for STOP before issuing the next transaction. On a stuck bus, skip
+       the magnetometer leg: _busy is already clear, so the main loop restarts
+       the whole chain instead of this one wedging it permanently. */
+    if (!i2c_dma_wait_idle())
+        return;
     i2c_dma_read(AK8963_ADDR, AK8963_HXL, _mag_buf, 7, on_mag_done, NULL);
 }
 
