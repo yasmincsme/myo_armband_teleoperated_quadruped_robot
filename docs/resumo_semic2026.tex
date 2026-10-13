@@ -48,10 +48,12 @@
 % longos como teleop_twist_keyboard provocam overfull hbox.
 \usepackage[htt]{hyphenat}
 
-% Citação numérica estilo IEEE sem depender de bibtex. As entradas vivem
-% no ambiente thebibliography ao final e \cite{chave} resolve para [n]
-% automaticamente — basta compilar duas vezes para fixar os números.
+% Citação numérica estilo IEEE via bibtex (referencias.bib). Diferente de
+% um thebibliography manual, só aparecem aqui as entradas efetivamente
+% citadas com \cite{} no texto — nenhuma curadoria manual é necessária.
+% Compilar: pdflatex -> bibtex resumo_semic2026 -> pdflatex -> pdflatex.
 \usepackage[numbers]{natbib}
+\bibliographystyle{unsrtnat}
 
 % Seções sem numeração, negrito, alinhadas à esquerda. O texto não é
 % convertido para maiúsculas: alguns títulos do modelo misturam caixa,
@@ -138,25 +140,21 @@
 % ---------------------------------------------------------------------
 \section{INTRODUÇÃO}
 
-A teleoperação de robôs em ambientes de difícil acesso ou de risco motivou o
-desenvolvimento de interfaces que capturam movimentos naturais do operador em
-substituição a controles manuais convencionais, como joysticks e teclados, cuja
-limitação de graus de liberdade dificulta o comando intuitivo de plataformas
-com múltiplas articulações~\cite{li2019intuitive}. Entre as abordagens
-vestíveis, a eletromiografia de superfície (sEMG) ganhou destaque por traduzir
-diretamente a atividade muscular em comandos, dispensando sensores externos e
-sendo robusta a variações de iluminação e outras limitações
-físicas~\cite{sultana2023systematic}. Nesse contexto, o Myo Armband,
-braçadeira de baixo custo que integra sensores de sEMG e uma unidade de medida
-inercial (IMU), tornou-se referência na área~\cite{visconti2018technical}.
-Trabalhos como os de
-Sathiyanarayanan \textit{et al.}~\cite{sathiyanarayanan2015controlling} e
-Morais \textit{et al.}~\cite{morais2016application} demonstraram seu uso no
-controle de robôs móveis, porém restritos a plataformas com rodas, cuja
-dinâmica dispensa a coordenação temporal estrita exigida por robôs
-quadrúpedes. Resta, portanto, uma lacuna no uso dessa classe de interface para
-plataformas com complexidade superior, como robôs com patas, nas quais a
-latência fim a fim do canal de comando impacta diretamente a estabilidade da
+A teleoperação em ambientes de difícil acesso tem impulsionado a transição de
+controles manuais limitados (como joysticks), cuja restrição de graus de
+liberdade dificulta o comando intuitivo de plataformas com múltiplas
+articulações~\cite{li2019intuitive}, para interfaces mais intuitivas capazes
+de capturar movimentos naturais do operador. Nesse cenário, a eletromiografia
+de superfície (sEMG) ganhou destaque por sua robustez a variações de
+iluminação e a outras limitações físicas que afetam sensores
+visuais~\cite{sultana2023systematic}, especialmente por meio de dispositivos
+acessíveis como o Myo Armband, braçadeira de baixo custo que integra sensores
+de sEMG e uma unidade de medida inercial (IMU)~\cite{visconti2018technical}.
+Embora a literatura já demonstre a eficácia dessa tecnologia no controle de
+robôs com rodas~\cite{sathiyanarayanan2015controlling,morais2016application},
+resta uma lacuna no uso dessas interfaces em plataformas de complexidade
+superior, como robôs com patas, nas quais a latência fim a fim do canal de
+comando impacta diretamente a estabilidade da
 marcha~\cite{siegwart2011introduction,risiglione2021passivity}.
 
 Para endereçar essa lacuna, este trabalho apresenta o desenvolvimento e a
@@ -167,12 +165,11 @@ Raspberry Pi e microcontrolador embarcado) que desacopla a aquisição de
 sinais, a classificação de cinco gestos (repouso, flexão, extensão, desvio
 ulnar e desvio radial) e a atuação nos servomotores, combinando o
 \textit{framework} micro-ROS 2 a estratégias de mitigação de latência no
-\textit{firmware}, em especial o acesso direto à memória (DMA) na leitura
-dos sensores.
+\textit{firmware}.
 
 Os resultados experimentais demonstraram que a interface proposta alcançou uma
 acurácia de classificação de gestos de [INSERIR \%] e uma latência fim a fim
-média de [INSERIR ms]; as análises qualitativas de trajetória confirmaram que
+média de [INSERIR ms]; além disso, as análises qualitativas de trajetória confirmaram que
 o controle intuitivo permitiu manter a estabilidade dinâmica da marcha do
 robô durante a locomoção. O restante deste artigo está organizado como segue:
 a Seção~2 detalha a metodologia, a arquitetura de hardware/software e os
@@ -186,19 +183,22 @@ para trabalhos futuros.
 \subsection*{2.1 Visão geral da arquitetura}
 
 O sistema é organizado em três camadas, cujo fluxo de dados é ilustrado na
-Figura~\ref{fig:arquitetura}. Na primeira camada, o Myo Armband adquire oito
-canais de sEMG em 200~Hz e dados de IMU em 50~Hz, transmitidos por BLE a um
-computador operador. O computador executa pré-processamento, dois
-\textit{gates} em cascata e um classificador de gestos; o rótulo resultante
-é publicado como \texttt{motion\_state} e convertido em \texttt{geometry\_msgs/Twist}
-no tópico \texttt{/cmd\_vel}. Na segunda camada, uma Raspberry Pi hospeda o
-agente micro-ROS 2 e retransmite as mensagens recebidas por Wi-Fi (ROS 2 DDS
-na configuração padrão da distribuição) ao microcontrolador. Na terceira
-camada, um Raspberry Pi Pico (RP2350) consome o \texttt{/cmd\_vel}, gera a
-sequência de referência dos servos — enviando comandos de posição em alta
-frequência a uma placa controladora SSC-32 responsável pelo acionamento dos
-servomotores — e, em paralelo, lê os sensores embarcados (fluxo óptico
-PMW3901, infravermelho SharpIR, sonar HC-SR04 e IMU MPU9250/MPU6500).
+Figura~\ref{fig:arquitetura}. Na primeira camada, a braçadeira Myo Armband
+adquire dados de movimento e de atividade muscular do operador e os
+transmite a um computador central. Esse computador executa o
+pré-processamento dos sinais e um classificador de gestos, inspirado na
+implementação de Caffagni~\cite{caffagni2023myo}, e publica, via ROS 2, as
+velocidades linear e angular correspondentes ao gesto reconhecido. Na
+segunda camada, uma Raspberry Pi hospeda o agente micro-ROS 2 e retransmite
+ao microcontrolador as mensagens recebidas da camada anterior por Wi-Fi
+(ROS~2 DDS); para isso, configurou-se uma subrede dedicada que permitiu a
+propagação dos comandos do ROS~2 e o reconhecimento mútuo dos tópicos e nós
+do computador operador e da Raspberry Pi. Na terceira camada, um Raspberry
+Pi Pico (RP2350) recebe essas velocidades e as converte em comandos de
+posição, enviados em alta frequência à placa controladora SSC-32 através do
+protocolo UART, responsável pelo acionamento dos servomotores. Em paralelo,
+o Pico lê os sensores embarcados: fluxo óptico PMW3901, infravermelho
+SharpIR, sonar HC-SR04 e IMU MPU9250/MPU6500.
 
 \begin{figure}[htbp]
 \centering
@@ -210,32 +210,81 @@ $t_0$ e $t_1$ usados para medir a latência fim a fim.}
 \label{fig:arquitetura}
 \end{figure}
 
-\subsection*{2.2 Aquisição e classificação (lado do operador)}
+\subsection*{2.2 Aquisição, pré-processamento e classificação}
+\label{sec:aquisicao-classificacao}
 
-O classificador reconhece \textbf{cinco gestos} (repouso, flexão, extensão,
-desvio ulnar, desvio radial), mapeados a quatro estados de locomoção
-(\texttt{STOPPED}, \texttt{WALKING}, \texttt{TURNING\_LEFT},
-\texttt{TURNING\_RIGHT}) por uma máquina de estados que publica continuamente
-\texttt{/cmd\_vel} a 20~Hz, mantendo o fluxo esperado por qualquer
-\textit{watchdog} do controlador. Para cada janela de 30 amostras do sEMG são
-extraídos quatro descritores por canal — valor absoluto médio (MAV),
-comprimento de forma de onda (WL), cruzamentos por zero (ZC) e trocas de sinal
-da derivada (SSC) —, totalizando 32 características. O vetor é normalizado por
-\texttt{MinMaxScaler} em [$-1$, $1$] e classificado por uma máquina de vetores
-de suporte (SVM) com \textit{kernel} RBF (\textit{scikit-learn} com
-hiperparâmetros padrão); após cada detecção aplica-se um período refratário
-de 20 amostras para suprimir redetecções do mesmo gesto.
+Os sinais do operador são adquiridos pela braçadeira Myo Armband, que
+combina oito canais de eletromiografia de superfície (sEMG) e uma
+unidade de medida inercial (IMU) com acelerômetro e giroscópio
+triaxiais. O dispositivo foi escolhido por seu custo-benefício e por
+sua crescente popularidade na comunidade científica ~\cite{mendez2017evaluation}. No sistema,
+braçadeira conecta-se diretamente ao computador por Bluetooth, com o
+EMG em modo bruto, sem filtragem ou retificação pelo dispositivo, e os
+sinais são processados em tempo real.
 
-Antes de inferir, dois \textit{gates} em cascata usam a IMU da braçadeira para
-decidir se o classificador é acionado. O primeiro verifica a postura do
-antebraço (\textit{arm\_posture}): o \textit{pitch} estimado a partir da
-direção da gravidade deve estar dentro de $\pm 30^\circ$ da horizontal
-(0$^\circ$), suavizado por uma média exponencial com $\alpha = 0{,}1$. O
-segundo é um detector de repouso baseado em SHOE (\textit{Stance Hypothesis
-Optimal Estimator}), com janela de 20 amostras e limiar $\gamma = 45$, que só
-libera a classificação quando acusa movimento. Em repouso, as amostras de
-EMG são descartadas, o que reduz carga computacional e evita classificações
-espúrias.
+No pré-processamento, as leituras da IMU são apenas convertidas para o
+Sistema Internacional (m/s\textsuperscript{2} e rad/s), garantindo
+compatibilidade com o ROS~2, e alimentam duas verificações sucessivas
+que decidem se o EMG deve ser processado. A primeira estima a
+inclinação (\textit{pitch}) do antebraço a partir da direção da
+gravidade medida pelo acelerômetro, suavizada por uma média móvel
+exponencial, e só autoriza o prosseguimento quando o antebraço está
+próximo da horizontal, dentro de uma tolerância angular em torno do
+alvo (Tabela~\ref{tab:parametros}). Essa restrição de postura busca
+reduzir a variabilidade do sinal mioelétrico associada à posição do
+membro, efeito documentado por Fougner \textit{et
+al.}~\cite{fougner2011limb}, que mostram sua degradação da
+classificação e propõem medir a posição do membro com acelerômetros. A
+segunda verificação aplica, sobre o mesmo sinal de IMU, o detector de
+parada SHOE, formulado por Skog \textit{et al.}~\cite{skog2010zero} e
+aqui reaproveitado para reconhecer quando o antebraço está parado.
+Assim, o EMG só é processado quando o antebraço está na orientação correta e
+em movimento; caso contrário, suas amostras são descartadas.
+
+Satisfeitas as duas condições, o EMG é acumulado em janelas de 30
+amostras (150~ms a 200~Hz), valor no limite inferior da faixa de 150 a
+250~ms que Smith \textit{et al.}~\cite{smith2011window} identificaram
+como ótima no sistema que avaliaram, no qual janelas maiores reduzem o
+erro de classificação, mas aumentam o atraso do controlador. Para cada
+canal, extraem-se quatro descritores no domínio do tempo: valor
+absoluto médio (MAV), comprimento de forma de onda (WL), número de
+cruzamentos por zero (ZC) e número de trocas de sinal da derivada
+(SSC)~\cite{hudgins1993new}. O vetor resultante é normalizado por
+reescala linear e enviado ao classificador, e, após cada decisão, um
+intervalo refratário de 20 amostras (100~ms) suprime novas decisões.
+
+% Figura 1 (Seção 2.1): sugere-se destacar nela o trecho
+% IMU -> postura -> movimento -> EMG -> SVM -> velocidades.
+
+\begin{table}[htbp]
+\centering
+\caption{Parâmetros do pré-processamento e da classificação. Canais e
+taxas são especificações do dispositivo; os demais valores foram
+definidos empiricamente ou pelo protocolo de coleta.}
+\label{tab:parametros}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Parâmetro} & \textbf{Valor} \\
+\midrule
+Canais de sEMG & 8 \\
+Taxa de envio do EMG & [CONFIRMAR] \\
+Taxa de envio da IMU & [CONFIRMAR] \\
+Alvo de \textit{pitch} & 0$^\circ$ \\
+Tolerância de \textit{pitch} & $\pm 30^\circ$ \\
+Constante da média exponencial ($\alpha$) & 0,1 \\
+Janela do detector de movimento & 20 amostras \\
+Limiar do detector de movimento ($\gamma$) & 45 \\
+Janela de EMG & 30 amostras (150~ms) \\
+Intervalo refratário & 20 amostras (100~ms) \\
+Classes de gesto & 5 \\
+Janelas coletadas por classe & 50 \\
+Divisão treino/teste & 80\,\%~/~20\,\% (estratificada) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Por fim, o vetor de características é classificado por uma máquina de vetores de suporte (SVM) com núcleo radial (RBF)~\cite{cortes1995svm}, escolhida pelo baixo custo computacional de inferência, compatível com a operação em tempo real sem aceleração dedicada. Para treiná-la, construiu-se uma base própria, com um único participante em uma única sessão, composta por cinquenta janelas para cada uma das cinco classes de gesto, registradas com o gesto sustentado e divididas em 80,\% para treino e 20,\% para teste. Em operação, cada gesto reconhecido pelo modelo treinado é convertido em velocidades linear e angular, publicadas via ROS~2 para a camada intermediária do sistema (Seção~\ref{sec:camada-intermediaria}).
 
 \subsection*{2.3 Camada intermediária}
 
@@ -265,16 +314,9 @@ transferência em 5~ms, impedindo que uma falha isolada paralise o laço.
 
 \subsection*{2.5 Protocolo experimental}
 
-A base de treino do classificador foi coletada com um único participante — a
-autora — em [PREENCHER: número de sessões] sessões, com [PREENCHER:
-repetições por gesto] repetições por classe. A opção pelo treino
-intra-sujeito justifica-se pela variabilidade inter-sujeito significativa do
-sinal mioelétrico de superfície, que torna classificadores universais um
-problema aberto mesmo em centros com instrumentação robusta e bases de dados
-amplas; portanto, o escopo deste trabalho é a caracterização do
-\textit{pipeline} de controle, não a generalização inter-sujeito. A
-acurácia é reportada sobre o conjunto de teste (20\% da base, divisão
-estratificada com \texttt{random\_state=42}).
+A coleta da base de treino do classificador e a divisão treino/teste já
+foram descritas na Seção 2.2. Esta subseção cobre apenas o protocolo de
+medição de latência e de avaliação qualitativa das trajetórias.
 
 A latência fim a fim é medida por \textit{timestamps} em dois pontos:
 $t_0$ = instante da decisão do classificador no computador operador, e
@@ -374,57 +416,10 @@ O(s) último(s) parágrafo(s) dos resultados e discussão deve(m) trazer as
 conclusões sumarizadas na forma de texto corrido.
 
 % ---------------------------------------------------------------------
-% As entradas abaixo seguem a ordem em que são citadas no texto; o natbib
-% imprime [1], [2], ... automaticamente.
-\section{REFERÊNCIAS}
-\begin{thebibliography}{9}
-
-\bibitem{li2019intuitive}
-LI, S.; RAMESHWAR, R.; VOTTA, A. M.; ONAL, C. D.
-Intuitive Control of a Robotic Arm and Hand System with Pneumatic Haptic Feedback.
-\textit{IEEE Robotics and Automation Letters}, v. 4, n. 4, p. 3852--3863, 2019.
-DOI: \url{10.1109/LRA.2019.2930433}.
-
-\bibitem{sultana2023systematic}
-SULTANA, A.; AHMED, F.; ALAM, M. S.
-A systematic review on surface electromyography-based classification system for
-identifying hand and finger movements.
-\textit{Healthcare Analytics}, v. 3, p. 100126, 2023.
-DOI: \url{10.1016/j.health.2023.100126}.
-
-\bibitem{visconti2018technical}
-VISCONTI, P.; GAETANI, F.; ZAPPATORE, G. A.; PRIMICERI, P.
-Technical Features and Functionalities of Myo Armband: An Overview on Related
-Literature and Advanced Applications of Myoelectric Armbands Mainly Focused on
-Arm Prostheses.
-\textit{International Journal on Smart Sensing and Intelligent Systems},
-v. 11, n. 1, p. 1--25, 2018. DOI: \url{10.21307/ijssis-2018-005}.
-
-\bibitem{sathiyanarayanan2015controlling}
-SATHIYANARAYANAN, M.; MULLING, T.; NAZIR, B.
-Controlling a robot using a wearable device (MYO).
-\textit{International Journal of Engineering Development and Research},
-v. 3, n. 3, p. 1--6, 2015.
-
-\bibitem{morais2016application}
-MORAIS, G. D.; NEVES, L. C.; MASIERO, A.; CASTRO, M. C. F.
-Application of Myo armband system to control a robot Interface.
-In: \textit{Proceedings of the 9th International Conference on Biomedical
-Engineering Systems and Technologies (BIOSTEC)}, v. 4, p. 227--231, 2016.
-DOI: \url{10.5220/0005706302270231}.
-
-\bibitem{siegwart2011introduction}
-SIEGWART, R.; NOURBAKHSH, I. R.; SCARAMUZZA, D.
-\textit{Introduction to Autonomous Mobile Robots}. 2.~ed. Cambridge, MA:
-MIT Press, 2011.
-
-\bibitem{risiglione2021passivity}
-RISIGLIONE, M.; SLEIMAN, J.-P.; MINNITI, M. V.; ÇIZMECI, B.; DRESSCHER, D.;
-HUTTER, M.
-Passivity-based control for haptic teleoperation of a legged manipulator in
-presence of time-delays. arXiv:2108.07658, 2021.
-\url{https://arxiv.org/abs/2108.07658}.
-
-\end{thebibliography}
+% Bibliografia via bibtex (referencias.bib): só entram aqui as referências
+% com \cite{} usado em algum ponto do texto. Remover um \cite não deixa
+% entrada órfã — ela simplesmente some da lista na próxima compilação.
+\renewcommand{\refname}{REFERÊNCIAS}
+\bibliography{referencias}
 
 \end{document}
