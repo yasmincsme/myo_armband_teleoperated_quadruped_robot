@@ -1,0 +1,430 @@
+% =====================================================================
+%  Template de Resumo — XXX Seminário de Iniciação Científica da UEFS
+%  Semana Nacional de Ciência e Tecnologia — 2026
+%
+%  Compilar:  pdflatex resumo_semic2026.tex
+%  Requer:    cabecalho.png  (bloco do cabeçalho institucional com logos)
+%
+%  As medidas abaixo foram extraídas do PDF de referência com pdftotext
+%  -bbox-layout, não estimadas:
+%    margem esquerda/direita = 85,1 / 85,8 pt  -> 3,0 cm
+%    primeira linha de tinta = 70,3 pt do topo
+%    largura do cabeçalho    = 308,0 pt na linha "XXX SEMINÁRIO..."
+% =====================================================================
+\documentclass[12pt,a4paper]{article}
+
+% O PDF de referência usa Times New Roman real (pdffonts: TimesNewRomanPSMT).
+% Com lualatex/xelatex usamos a Liberation Serif, que é metricamente idêntica
+% à Times New Roman e portanto produz as MESMAS quebras de linha. Com pdflatex
+% cai no mathptmx, visualmente igual mas com métrica ligeiramente diferente,
+% o que desloca algumas quebras.
+%
+%   lualatex resumo_semic2026.tex   <- recomendado, reproduz a referência
+%   pdflatex resumo_semic2026.tex   <- funciona, com pequenas diferenças
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{mathptmx}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Liberation Serif}  % substitua por "Times New Roman" se instalada
+\fi
+\usepackage[brazilian]{babel}
+
+% top=53,5 pt posiciona a PRIMEIRA TINTA da imagem do cabeçalho em ~62 pt,
+% ajustado empiricamente (referência: 70,3 pt, PNG tem margem interna <8 pt).
+\usepackage{geometry}
+\geometry{a4paper, left=3cm, right=3cm, top=53.5pt, bottom=2.5cm}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage[hidelinks]{hyperref}
+
+% Permite quebra de \texttt{} em sublinhados — sem isso identificadores
+% longos como teleop_twist_keyboard provocam overfull hbox.
+\usepackage[htt]{hyphenat}
+
+% Citação numérica estilo IEEE sem depender de bibtex. As entradas vivem
+% no ambiente thebibliography ao final e \cite{chave} resolve para [n]
+% automaticamente — basta compilar duas vezes para fixar os números.
+\usepackage[numbers]{natbib}
+
+% Seções sem numeração, negrito, alinhadas à esquerda. O texto não é
+% convertido para maiúsculas: alguns títulos do modelo misturam caixa,
+% como "RESULTADOS E/OU DISCUSSÃO (ou Análise e discussão dos resultados)".
+\setcounter{secnumdepth}{0}
+\titleformat{\section}{\normalfont\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{14.9pt plus 2pt minus 2pt}{1.3pt}
+
+% Tabela: legenda acima, centralizada, separador ponto.
+% Figura:  legenda abaixo, justificada, menor, rótulo em negrito, dois-pontos.
+\captionsetup[table]{labelsep=period, justification=centering,
+                     font=normalsize, skip=4pt}
+\captionsetup[figure]{labelsep=colon, justification=justified,
+                      font=small, labelfont=bf, skip=6pt}
+
+% Entrelinha de 15,87 pt, medido no PDF de referência. O padrão do 12 pt é
+% 14,45 pt, o que acumularia ~50 pt de defasagem ao longo da página.
+\linespread{1.098}
+
+\setlength{\parindent}{0pt}
+% Espaçamento entre parágrafos: ~meia linha, acompanhando o modelo da UEFS.
+\setlength{\parskip}{6pt plus 1pt minus 1pt}
+
+% O ambiente center injeta ~10 pt acima e abaixo (\topsep + \parskip), o que
+% empurra todo o bloco de título/autores para baixo. Esta versão não injeta
+% nada, deixando o espaçamento inteiramente sob controle dos \vspace.
+\newenvironment{bloco}
+  {\setlength{\topsep}{0pt}\setlength{\partopsep}{0pt}\begin{center}}
+  {\end{center}}
+
+\begin{document}
+\pagestyle{empty}   % o modelo não numera as páginas
+
+% ---------------------------------------------------------------------
+% CABEÇALHO INSTITUCIONAL (imagem: logos + texto em Arial)
+% 328 pt reproduz a largura medida no PDF de referência. O \makebox evita
+% o espaço vertical extra que o ambiente center introduziria.
+% ---------------------------------------------------------------------
+\noindent\makebox[\textwidth][c]{\includegraphics[width=328pt]{cabecalho.png}}
+
+\vspace{4.6pt}
+
+% ---------------------------------------------------------------------
+% TÍTULO
+% Com o \linespread global o título já sai com os 15,9 pt da referência.
+% ---------------------------------------------------------------------
+\begin{bloco}
+    \textbf{Interface de Controle Mioelétrico Baseado no Sensor Myo Armband para\\
+    Teleoperação de Robôs}
+\end{bloco}
+
+\vspace{17.8pt}
+
+% ---------------------------------------------------------------------
+% AUTORES
+% ---------------------------------------------------------------------
+\begin{bloco}
+    \underline{\textbf{Yasmin Cordeiro de Souza Meira}}\textsuperscript{1};
+    \textbf{Anfranserai Morais Dias}\textsuperscript{2}
+\end{bloco}
+
+\vspace{0.6pt}
+
+% As linhas de afiliação são mais largas que a mancha de texto no original
+% (começam em 62,4 pt, à esquerda da margem de 85,1 pt). O \makebox permite
+% esse transbordo sem aviso de overfull. O corpo 9,5 reproduz a largura
+% medida na referência; o entrelinha de 11,9 pt, o espaçamento entre as duas.
+\noindent\makebox[\textwidth][c]{%
+  \begin{minipage}{1.14\textwidth}
+    \centering
+    \fontsize{9.5}{10.84}\selectfont
+    1.Yasmin Cordeiro de Souza Meira, PIBIC/FAPESB, ENGENHARIA DE COMPUTAÇÃO, e-mail: ymeira@ecomp.uefs.br\\
+    2.Anfranserai Morais Dias, DEPARTAMENTO DE TECNOLOGIA, e-mail: amdias@uefs.br
+  \end{minipage}}
+
+\vspace{20.2pt}
+
+\begin{bloco}
+    \textbf{PALAVRAS-CHAVE:} uma; duas; três
+\end{bloco}
+
+\vspace{1pt}
+
+% ---------------------------------------------------------------------
+\section{INTRODUÇÃO}
+
+A teleoperação de robôs em ambientes de difícil acesso ou de risco motivou o
+desenvolvimento de interfaces que capturam movimentos naturais do operador em
+substituição a controles manuais convencionais, como joysticks e teclados, cuja
+limitação de graus de liberdade dificulta o comando intuitivo de plataformas
+com múltiplas articulações~\cite{li2019intuitive}. Entre as abordagens
+vestíveis, a eletromiografia de superfície (sEMG) ganhou destaque por traduzir
+diretamente a atividade muscular em comandos, dispensando sensores externos e
+sendo robusta a variações de iluminação e outras limitações
+físicas~\cite{sultana2023systematic}. Nesse contexto, o Myo Armband,
+braçadeira de baixo custo que integra sensores de sEMG e uma unidade de medida
+inercial (IMU), tornou-se referência na área~\cite{visconti2018technical}.
+Trabalhos como os de
+Sathiyanarayanan \textit{et al.}~\cite{sathiyanarayanan2015controlling} e
+Morais \textit{et al.}~\cite{morais2016application} demonstraram seu uso no
+controle de robôs móveis, porém restritos a plataformas com rodas, cuja
+dinâmica dispensa a coordenação temporal estrita exigida por robôs
+quadrúpedes. Resta, portanto, uma lacuna no uso dessa classe de interface para
+plataformas com complexidade superior, como robôs com patas, nas quais a
+latência fim a fim do canal de comando impacta diretamente a estabilidade da
+marcha~\cite{siegwart2011introduction,risiglione2021passivity}.
+
+Para endereçar essa lacuna, este trabalho apresenta o desenvolvimento e a
+caracterização de uma interface de teleoperação mioelétrica para o robô
+quadrúpede SH3 [descrição breve], sob restrições estritas de tempo real. A
+solução baseia-se em uma arquitetura de três camadas (computador do operador,
+Raspberry Pi e microcontrolador embarcado) que desacopla a aquisição de
+sinais, a classificação de cinco gestos (repouso, flexão, extensão, desvio
+ulnar e desvio radial) e a atuação nos servomotores, combinando o
+\textit{framework} micro-ROS 2 a estratégias de mitigação de latência no
+\textit{firmware}, em especial o acesso direto à memória (DMA) na leitura
+dos sensores.
+
+Os resultados experimentais demonstraram que a interface proposta alcançou uma
+acurácia de classificação de gestos de [INSERIR \%] e uma latência fim a fim
+média de [INSERIR ms]; as análises qualitativas de trajetória confirmaram que
+o controle intuitivo permitiu manter a estabilidade dinâmica da marcha do
+robô durante a locomoção. O restante deste artigo está organizado como segue:
+a Seção~2 detalha a metodologia, a arquitetura de hardware/software e os
+algoritmos de filtragem; a Seção~3 apresenta e discute os resultados de
+latência e desempenho; e a Seção~4 consolida as conclusões e aponta direções
+para trabalhos futuros.
+
+% ---------------------------------------------------------------------
+\section{METODOLOGIA}
+
+\subsection*{2.1 Visão geral da arquitetura}
+
+O sistema é organizado em três camadas, cujo fluxo de dados é ilustrado na
+Figura~\ref{fig:arquitetura}. Na primeira camada, o Myo Armband adquire oito
+canais de sEMG em 200~Hz e dados de IMU em 50~Hz, transmitidos por BLE a um
+computador operador. O computador executa pré-processamento, dois
+\textit{gates} em cascata e um classificador de gestos; o rótulo resultante
+é publicado como \texttt{motion\_state} e convertido em \texttt{geometry\_msgs/Twist}
+no tópico \texttt{/cmd\_vel}. Na segunda camada, uma Raspberry Pi hospeda o
+agente micro-ROS 2 e retransmite as mensagens recebidas por Wi-Fi (ROS 2 DDS
+na configuração padrão da distribuição) ao microcontrolador. Na terceira
+camada, um Raspberry Pi Pico (RP2350) consome o \texttt{/cmd\_vel}, gera a
+sequência de referência dos servos — enviando comandos de posição em alta
+frequência a uma placa controladora SSC-32 responsável pelo acionamento dos
+servomotores — e, em paralelo, lê os sensores embarcados (fluxo óptico
+PMW3901, infravermelho SharpIR, sonar HC-SR04 e IMU MPU9250/MPU6500).
+
+\begin{figure}[htbp]
+\centering
+% Substitua pelo diagrama de blocos definitivo:
+% \includegraphics[width=0.9\textwidth]{arquitetura.png}
+\framebox[0.9\textwidth][c]{\rule{0pt}{4cm}\textit{diagrama de blocos da arquitetura em três camadas (a inserir)}}
+\caption{Arquitetura em três camadas. As setas tracejadas indicam os pontos
+$t_0$ e $t_1$ usados para medir a latência fim a fim.}
+\label{fig:arquitetura}
+\end{figure}
+
+\subsection*{2.2 Aquisição e classificação (lado do operador)}
+
+O classificador reconhece \textbf{cinco gestos} (repouso, flexão, extensão,
+desvio ulnar, desvio radial), mapeados a quatro estados de locomoção
+(\texttt{STOPPED}, \texttt{WALKING}, \texttt{TURNING\_LEFT},
+\texttt{TURNING\_RIGHT}) por uma máquina de estados que publica continuamente
+\texttt{/cmd\_vel} a 20~Hz, mantendo o fluxo esperado por qualquer
+\textit{watchdog} do controlador. Para cada janela de 30 amostras do sEMG são
+extraídos quatro descritores por canal — valor absoluto médio (MAV),
+comprimento de forma de onda (WL), cruzamentos por zero (ZC) e trocas de sinal
+da derivada (SSC) —, totalizando 32 características. O vetor é normalizado por
+\texttt{MinMaxScaler} em [$-1$, $1$] e classificado por uma máquina de vetores
+de suporte (SVM) com \textit{kernel} RBF (\textit{scikit-learn} com
+hiperparâmetros padrão); após cada detecção aplica-se um período refratário
+de 20 amostras para suprimir redetecções do mesmo gesto.
+
+Antes de inferir, dois \textit{gates} em cascata usam a IMU da braçadeira para
+decidir se o classificador é acionado. O primeiro verifica a postura do
+antebraço (\textit{arm\_posture}): o \textit{pitch} estimado a partir da
+direção da gravidade deve estar dentro de $\pm 30^\circ$ da horizontal
+(0$^\circ$), suavizado por uma média exponencial com $\alpha = 0{,}1$. O
+segundo é um detector de repouso baseado em SHOE (\textit{Stance Hypothesis
+Optimal Estimator}), com janela de 20 amostras e limiar $\gamma = 45$, que só
+libera a classificação quando acusa movimento. Em repouso, as amostras de
+EMG são descartadas, o que reduz carga computacional e evita classificações
+espúrias.
+
+\subsection*{2.3 Camada intermediária}
+
+A Raspberry Pi recebe \texttt{/cmd\_vel} por rede local (Wi-Fi) e hospeda o
+agente XRCE-DDS que serializa as mensagens ao RP2350 por USB CDC
+(\textit{Communications Device Class}). Essa escolha dispensa conversor
+USB-serial — removendo o \textit{jitter} e a latência de um chip
+FTDI/CP210x do caminho — e usa o mesmo cabo para alimentar o microcontrolador.
+
+\subsection*{2.4 \textit{Firmware} embarcado (RP2350)}
+
+O laço principal do \textit{firmware} alterna o atendimento do executor
+micro-ROS (\texttt{rclc\_executor\_spin\_some}, orçamento de 10~ms por
+iteração) com a rotina de marcha, que gera a trajetória nominal dos servos
+em função do \texttt{/cmd\_vel} corrente e a transmite à SSC-32 por UART. As
+leituras dos sensores são desacopladas desse laço por meio das seguintes
+estratégias de mitigação de latência: (i) \textit{Direct Memory Access}
+(DMA) nas transações do PMW3901 (SPI) e da MPU9250/MPU6500 (I$^2$C),
+evitando que o núcleo responsável pela marcha seja bloqueado em operações de
+entrada e saída; (ii) temporização dos ciclos periódicos de amostragem por
+\textit{hardware alarms} do RP2350, eliminando laços de espera e reduzindo o
+\textit{jitter} de amostragem; (iii) medição do pulso de eco do HC-SR04 por
+interrupção de borda em GPIO (\textit{General Purpose Input/Output}),
+dispensando leitura bloqueante; e (iv) um \textit{watchdog} sobre as
+transações DMA que aborta e rearma a cadeia quando o escravo não confirma a
+transferência em 5~ms, impedindo que uma falha isolada paralise o laço.
+
+\subsection*{2.5 Protocolo experimental}
+
+A base de treino do classificador foi coletada com um único participante — a
+autora — em [PREENCHER: número de sessões] sessões, com [PREENCHER:
+repetições por gesto] repetições por classe. A opção pelo treino
+intra-sujeito justifica-se pela variabilidade inter-sujeito significativa do
+sinal mioelétrico de superfície, que torna classificadores universais um
+problema aberto mesmo em centros com instrumentação robusta e bases de dados
+amplas; portanto, o escopo deste trabalho é a caracterização do
+\textit{pipeline} de controle, não a generalização inter-sujeito. A
+acurácia é reportada sobre o conjunto de teste (20\% da base, divisão
+estratificada com \texttt{random\_state=42}).
+
+A latência fim a fim é medida por \textit{timestamps} em dois pontos:
+$t_0$ = instante da decisão do classificador no computador operador, e
+$t_1$ = instante do recebimento do \texttt{/cmd\_vel} correspondente no
+\texttt{cmd\_vel\_callback} do RP2350; o par é propagado como campo adicional
+na própria mensagem para dispensar sincronização externa de relógios. São
+realizadas [PREENCHER: número de repetições] medidas com o robô
+[PREENCHER: parado em bancada / em marcha], das quais se reportam média e
+desvio padrão. Como condição de referência, repete-se o protocolo substituindo
+o pacote Myo pelo \texttt{teleop\_twist\_keyboard}, executado no mesmo
+computador operador e publicando \texttt{/cmd\_vel} sobre a mesma rede
+Wi-Fi — isolando, portanto, apenas o segmento \textit{aquisição + classificação}
+com o restante do caminho idêntico ao do protocolo principal. A coerência
+qualitativa das trajetórias é avaliada visualmente comparando-se as leituras
+publicadas pelos sensores embarcados (fluxo óptico, distância IR e sonar) ao
+comportamento observado do robô durante a locomoção.
+
+% ---------------------------------------------------------------------
+\section{RESULTADOS E/OU DISCUSSÃO (ou Análise e discussão dos resultados)}
+
+Apresentação e discussão dos resultados obtidos. Ilustrações como figuras,
+gráficos, fluxogramas e tabelas deverão ser incluídas no corpo do texto. Figuras
+e tabelas devem estar centralizadas entre as margens do texto. Figuras, fotos e
+gráficos devem ser apresentados com tamanho e detalhes suficientes. Evitar
+tabelas extensas, privilegiando-se dados médios, adequar tamanho ao espaço útil
+do papel, e suas legendas devem ser auto-explicativas. A numeração da ilustração
+deve ser sucessiva em algarismos arábicos (Tabela 1; Figura 1, por exemplo).
+
+\vspace{8pt}
+
+\begin{table}[htbp]
+\centering
+\caption{Principais características anatômicas das folhas de oito espécies de
+\textit{Pouteria} Aublet (Sapotaceae) ocorrentes no estado da Bahia}
+\label{tab:exemplo}
+
+{\small
+\begin{tabular}{@{}l*{8}{c}@{}}
+\toprule
+ & \multicolumn{8}{c}{\textbf{Espécies}} \\
+\cmidrule(l){2-9}
+\textbf{Caracteres} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4}
+                    & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} \\
+\midrule
+Ornamentação cuticular na epiderme adaxial & + & - & + & - & - & - & + & - \\
+Paredes anticlinais retas                  & + & - & - & - & + & + & - & - \\
+Paredes anticlinais sinuosas               & - & + & + & + & - & - & + & + \\
+Estômato anomocítico                       & - & - & - & - & + & - & + & - \\
+Estômato anisocítico                       & + & + & + & + & - & + & - & + \\
+Mesofilo dorsiventral                      & + & + & + & - & + & + & + & + \\
+Mesofilo isobilateral                      & - & - & - & + & - & - & - & - \\
+Número de camadas da epiderme              & 1 & 1 & 1 & 1 & 2 & 1 & 1 & 3 \\
+Número de camadas de parênquima paliçádico & 2 & 2 & 1 & 1 & 3 & 2 & 2 & 3 \\
+Laticíferos                                & + & + & + & + & + & + & + & + \\
+Tricomas                                   & - & + & + & + & - & + & + & - \\
+\bottomrule
+\end{tabular}}
+
+\vspace{4pt}
+{\footnotesize
+Legenda: 1. \textit{Pouteria andarahiensis} T.D.Penn., 2. \textit{P. caimito}
+(Ruiz \& Pavón) Radlk., 3. \textit{P. gardneri} (Mart. \& Miq.) Baehni,
+4. \textit{P. gardneriana} (A.DC.) Radlk., 5. \textit{P. grandiflora} (A.DC.)
+Baehni, 6. \textit{P. ramiflora} (Mart.) Radlk., 7. \textit{P. torta} (Mart.)
+Radlk., 8. \textit{P. venosa} (Mart.) Baehni. (+) = presente; (-) = ausente.}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+% Substitua pelo seu arquivo de imagem:
+% \includegraphics[width=0.75\textwidth]{figura1.png}
+\framebox[0.75\textwidth][c]{\rule{0pt}{5cm}\textit{espaço reservado para a figura}}
+\caption{Tipos polínicos observados nas amostras coletadas na Chapada
+Diamantina-BA. \textbf{A} - Acanthaceae (\textit{Anisacanthus}); B -
+Apocynaceae (\textit{Prestonia}); C-; Arecaceae. D - Asteraceae;
+E - Bignoniaceae (\textit{Zeyheria}); F - Campanulaceae (\textit{Centropogun});
+G - Lamiaceae (\textit{Hyptis}); H - Malvaceae (\textit{Helicteres});
+I - Malvaceae (\textit{Pavonia}) J - Mimosa \textit{pudica}
+K - Myrtaceae (\textit{Eucalyptus}) L -- Poaceae.}
+\label{fig:exemplo}
+\end{figure}
+
+As citações bibliográficas no texto deverão seguir os seguintes modelos: Quate
+(1965); (Quate, 1965); Erwin \& Sott (1980); Guimarães \textit{et al.} (1983). Os
+artigos devem ser citados em ordem cronológica. Todas as referências mencionadas
+no texto devem ser arroladas no final do trabalho. O último nome dos autores deve
+ser digitado em MAIÚSCULAS (ver modelo abaixo). Periódicos deverão ser abreviados
+de acordo com o \textit{World List of Scientific Periodicals} ou como indicado
+pelo próprio periódico ou, em caso de dúvida, buscar no site:
+\url{http://library.caltech.edu/reference/abbreviations}. A forma de citações das
+referências deve estar de acordo com os exemplos aqui apresentados.
+
+% ---------------------------------------------------------------------
+\section{CONSIDERAÇÕES FINAIS (ou Conclusão)}
+
+O(s) último(s) parágrafo(s) dos resultados e discussão deve(m) trazer as
+conclusões sumarizadas na forma de texto corrido.
+
+% ---------------------------------------------------------------------
+% As entradas abaixo seguem a ordem em que são citadas no texto; o natbib
+% imprime [1], [2], ... automaticamente.
+\section{REFERÊNCIAS}
+\begin{thebibliography}{9}
+
+\bibitem{li2019intuitive}
+LI, S.; RAMESHWAR, R.; VOTTA, A. M.; ONAL, C. D.
+Intuitive Control of a Robotic Arm and Hand System with Pneumatic Haptic Feedback.
+\textit{IEEE Robotics and Automation Letters}, v. 4, n. 4, p. 3852--3863, 2019.
+DOI: \url{10.1109/LRA.2019.2930433}.
+
+\bibitem{sultana2023systematic}
+SULTANA, A.; AHMED, F.; ALAM, M. S.
+A systematic review on surface electromyography-based classification system for
+identifying hand and finger movements.
+\textit{Healthcare Analytics}, v. 3, p. 100126, 2023.
+DOI: \url{10.1016/j.health.2023.100126}.
+
+\bibitem{visconti2018technical}
+VISCONTI, P.; GAETANI, F.; ZAPPATORE, G. A.; PRIMICERI, P.
+Technical Features and Functionalities of Myo Armband: An Overview on Related
+Literature and Advanced Applications of Myoelectric Armbands Mainly Focused on
+Arm Prostheses.
+\textit{International Journal on Smart Sensing and Intelligent Systems},
+v. 11, n. 1, p. 1--25, 2018. DOI: \url{10.21307/ijssis-2018-005}.
+
+\bibitem{sathiyanarayanan2015controlling}
+SATHIYANARAYANAN, M.; MULLING, T.; NAZIR, B.
+Controlling a robot using a wearable device (MYO).
+\textit{International Journal of Engineering Development and Research},
+v. 3, n. 3, p. 1--6, 2015.
+
+\bibitem{morais2016application}
+MORAIS, G. D.; NEVES, L. C.; MASIERO, A.; CASTRO, M. C. F.
+Application of Myo armband system to control a robot Interface.
+In: \textit{Proceedings of the 9th International Conference on Biomedical
+Engineering Systems and Technologies (BIOSTEC)}, v. 4, p. 227--231, 2016.
+DOI: \url{10.5220/0005706302270231}.
+
+\bibitem{siegwart2011introduction}
+SIEGWART, R.; NOURBAKHSH, I. R.; SCARAMUZZA, D.
+\textit{Introduction to Autonomous Mobile Robots}. 2.~ed. Cambridge, MA:
+MIT Press, 2011.
+
+\bibitem{risiglione2021passivity}
+RISIGLIONE, M.; SLEIMAN, J.-P.; MINNITI, M. V.; ÇIZMECI, B.; DRESSCHER, D.;
+HUTTER, M.
+Passivity-based control for haptic teleoperation of a legged manipulator in
+presence of time-delays. arXiv:2108.07658, 2021.
+\url{https://arxiv.org/abs/2108.07658}.
+
+\end{thebibliography}
+
+\end{document}
