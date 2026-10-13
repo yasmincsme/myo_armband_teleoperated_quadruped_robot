@@ -90,7 +90,11 @@ static float _kf_P = 1.0f;   /* error covariance                              */
 #define SSC_TX_PIN    8
 #define SSC_RX_PIN    9
 #define SSC_BAUD      115200
-#define OBSTACLE_M    0.15f
+/* Obstacle gate. Two thresholds instead of one: stopping at 0.15 m but only
+   resuming above 0.20 m keeps sensor noise at the boundary from toggling the
+   robot between walking and parked. */
+#define OBSTACLE_STOP_M   0.15f
+#define OBSTACLE_CLEAR_M  0.20f
 #define GAIT_QUERY_US 20000u
 
 static const char REST_CMD[] =
@@ -149,10 +153,11 @@ static const char *GAIT_RIGHT[GAIT_RIGHT_N] = {
 typedef enum { MOTION_NONE, MOTION_FORWARD, MOTION_LEFT, MOTION_RIGHT } motion_mode_t;
 typedef enum { GAIT_IDLE, GAIT_MOVING, GAIT_QUERYING } gait_fsm_t;
 
-static volatile motion_mode_t _motion    = MOTION_NONE;
+static volatile motion_mode_t _motion    = MOTION_NONE;  /* operator intent */
 static gait_fsm_t             _gait_fsm  = GAIT_IDLE;
 static int                    _gait_step = 0;
 static uint64_t               _last_q_us = 0;
+static bool                   _blocked   = false;        /* obstacle gate */
 
 /* ── SSC-32 helpers ───────────────────────────────────────────── */
 static void ssc_send(const char *cmd) {
@@ -175,7 +180,37 @@ static void ssc_step_send(void) {
 /* Called every main-loop iteration; advances gait only when SSC-32
    confirms the previous move is done AND no obstacle is within 15 cm. */
 static void gait_service(void) {
-    if (_gait_fsm == GAIT_IDLE) return;
+    /* Re-evaluated every iteration, not just when a step finishes, so an
+       obstacle appearing mid-stride stops the robot at the next step boundary
+       rather than after the whole cycle. */
+    if (!_blocked && _kf_x <= OBSTACLE_STOP_M)
+        _blocked = true;
+    else if (_blocked && _kf_x >= OBSTACLE_CLEAR_M)
+        _blocked = false;
+
+    if (_blocked) {
+        /* Park and stay parked regardless of what was commanded. _motion is
+           deliberately preserved: it is the operator's intent, and clearing it
+           here is what previously let the next /cmd_vel restart the gait
+           without ever consulting the obstacle gate. */
+        if (_gait_fsm != GAIT_IDLE) {
+            ssc_send(REST_CMD);
+            _gait_fsm  = GAIT_IDLE;
+            _gait_step = 0;
+        }
+        return;
+    }
+
+    /* Path clear: start, or resume, whatever motion currently stands. This is
+       the only place a gait is started, so the obstacle gate above cannot be
+       bypassed. */
+    if (_gait_fsm == GAIT_IDLE) {
+        if (_motion == MOTION_NONE) return;
+        ssc_step_send();
+        _last_q_us = time_us_64();
+        _gait_fsm  = GAIT_MOVING;
+        return;
+    }
 
     uint64_t now = time_us_64();
 
@@ -196,17 +231,10 @@ static void gait_service(void) {
         /* Still moving — re-query after interval */
         _gait_fsm = GAIT_MOVING;
     } else if (c == '.') {
-        /* Move complete — check obstacle before advancing */
-        if (_kf_x <= OBSTACLE_M) {
-            ssc_send(REST_CMD);
-            _gait_fsm = GAIT_IDLE;
-            _motion   = MOTION_NONE;
-        } else {
-            _gait_step++;
-            ssc_step_send();
-            _last_q_us = time_us_64();
-            _gait_fsm  = GAIT_MOVING;
-        }
+        _gait_step++;
+        ssc_step_send();
+        _last_q_us = time_us_64();
+        _gait_fsm  = GAIT_MOVING;
     }
     /* other chars (echoes, CR/LF): ignore */
 }
@@ -230,14 +258,14 @@ static void cmd_vel_callback(const void *msgin) {
 
     _motion    = m;
     _gait_step = 0;
+
     if (m == MOTION_NONE) {
         ssc_send(REST_CMD);
         _gait_fsm = GAIT_IDLE;
-    } else {
-        ssc_step_send();
-        _last_q_us = time_us_64();
-        _gait_fsm  = GAIT_MOVING;
     }
+    /* Starting a gait is left entirely to gait_service(), which owns the
+       obstacle gate. Commanding the servos from here is exactly how an
+       incoming /cmd_vel used to walk the robot into an obstacle. */
 #else
     /* SSC-32 desligada: apenas recebe a mensagem, sem tocar na UART. */
     (void)msgin;
