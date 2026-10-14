@@ -1,27 +1,15 @@
-\begin{thebibliography}{14}
+\begin{thebibliography}{12}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
 
-\bibitem[Li et~al.(2019)Li, Rameshwar, Votta, and Onal]{li2019intuitive}
-Sihui Li, Raagini Rameshwar, Ann~Marie Votta, and Cagdas~D. Onal.
-\newblock Intuitive control of a robotic arm and hand system with pneumatic haptic feedback.
-\newblock \emph{IEEE Robotics and Automation Letters}, 4\penalty0 (4):\penalty0 3852--3863, 2019.
-\newblock \doi{10.1109/LRA.2019.2930433}.
-
 \bibitem[Sultana et~al.(2023)Sultana, Ahmed, and Alam]{sultana2023systematic}
 Afroza Sultana, Farruk Ahmed, and Md.~Shafiul Alam.
 \newblock A systematic review on surface electromyography-based classification system for identifying hand and finger movements.
 \newblock \emph{Healthcare Analytics}, 3:\penalty0 100126, 2023.
 \newblock \doi{10.1016/j.health.2023.100126}.
-
-\bibitem[Visconti et~al.(2018)Visconti, Gaetani, Zappatore, and Primiceri]{visconti2018technical}
-Paolo Visconti, F.~Gaetani, G.~A. Zappatore, and Patrizio Primiceri.
-\newblock Technical features and functionalities of {Myo} armband: An overview on related literature and advanced applications of myoelectric armbands mainly focused on arm prostheses.
-\newblock \emph{International Journal on Smart Sensing and Intelligent Systems}, 11\penalty0 (1):\penalty0 1--25, 2018.
-\newblock \doi{10.21307/ijssis-2018-005}.
 
 \bibitem[Sathiyanarayanan et~al.(2015)Sathiyanarayanan, Mulling, and Nazir]{sathiyanarayanan2015controlling}
 Mithileysh Sathiyanarayanan, Tosh Mulling, and Bushra Nazir.

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.9.29)  13 OCT 2026 23:52
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.9.29)  14 OCT 2026 01:05
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -553,20 +553,16 @@ LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <9> not available
 (Font)              Font shape `OT1/ptm/b/n' tried instead on input line 114.
 LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <7> not available
 (Font)              Font shape `OT1/ptm/b/n' tried instead on input line 114.
-
-
-LaTeX Warning: Reference `sec:classificacao' on page 1 undefined on input line 189.
-
-[1
+ [1
 
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc} <./cabecalho.png>]
 LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <10.95> not available
-(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 216.
+(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 212.
 LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <8> not available
-(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 216.
+(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 212.
 LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <6> not available
-(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 216.
- [2] [3] [4] (./resumo_semic2026.bbl [5]) [6] (./resumo_semic2026.aux)
+(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 212.
+ [2] (./resumo_semic2026.bbl [3] [4] [5]) [6] (./resumo_semic2026.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
@@ -575,25 +571,22 @@ L3 programming layer <2024-01-22>
 
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
-
-LaTeX Warning: There were undefined references.
-
 Package rerunfilecheck Info: File `resumo_semic2026.out' has not changed.
-(rerunfilecheck)             Checksum: AE818BE4E4D114BE14A1DC00DE370520;850.
+(rerunfilecheck)             Checksum: F350EC63A9190467D4FA830FFDE7E0B6;850.
  ) 
 Here is how much of TeX's memory you used:
- 12647 strings out of 476089
- 203210 string characters out of 5793232
- 1942975 words of memory out of 5000000
- 34454 multiletter control sequences out of 15000+600000
- 612765 words of font info for 112 fonts, out of 8000000 for 9000
+ 12630 strings out of 476089
+ 202925 string characters out of 5793232
+ 1940975 words of memory out of 5000000
+ 34446 multiletter control sequences out of 15000+600000
+ 611291 words of font info for 106 fonts, out of 8000000 for 9000
  61 hyphenation exceptions out of 8191
- 75i,9n,79p,729b,572s stack positions out of 10000i,1000n,20000p,200000b,200000s
- </home/yasmin-cordeiro/.texlive2023/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt1200.600pk></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/symbol/usyr.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on resumo_semic2026.pdf (6 pages, 133659 bytes).
+ 75i,9n,79p,729b,582s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ </home/yasmin-cordeiro/.texlive2023/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt1200.600pk></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
+Output written on resumo_semic2026.pdf (6 pages, 117414 bytes).
 PDF statistics:
- 145 PDF objects out of 1000 (max. 8388607)
- 102 compressed objects within 2 object streams
- 29 named destinations out of 1000 (max. 500000)
+ 128 PDF objects out of 1000 (max. 8388607)
+ 90 compressed objects within 1 object stream
+ 26 named destinations out of 1000 (max. 500000)
  38 words of extra memory for PDF output out of 10000 (max. 10000000)
 

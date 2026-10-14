@@ -140,21 +140,18 @@
 % ---------------------------------------------------------------------
 \section{INTRODUÇÃO}
 
-A teleoperação em ambientes de difícil acesso tem impulsionado a transição de
-controles manuais limitados (como joysticks), cuja restrição de graus de
-liberdade dificulta o comando intuitivo de plataformas com múltiplas
-articulações~\cite{li2019intuitive}, para interfaces mais intuitivas capazes
-de capturar movimentos naturais do operador. Nesse cenário, a eletromiografia
-de superfície (sEMG) ganhou destaque por sua robustez a variações de
-iluminação e a outras limitações físicas que afetam sensores
-visuais~\cite{sultana2023systematic}, especialmente por meio de dispositivos
-acessíveis como o Myo Armband, braçadeira de baixo custo que integra sensores
-de sEMG e uma unidade de medida inercial (IMU)~\cite{visconti2018technical}.
-Embora a literatura já demonstre a eficácia dessa tecnologia no controle de
-robôs com rodas~\cite{sathiyanarayanan2015controlling,morais2016application},
-resta uma lacuna no uso dessas interfaces em plataformas de complexidade
-superior, como robôs com patas, nas quais a latência fim a fim do canal de
-comando impacta diretamente a estabilidade da
+A teleoperação em ambientes de difícil acesso tem impulsionado a
+transição de controles manuais limitados (como joysticks) para
+interfaces mais intuitivas capazes de capturar movimentos naturais do
+operador. Nesse cenário, a eletromiografia de superfície (sEMG) ganhou
+destaque por sua robustez a variações de iluminação e a outras
+limitações físicas~\cite{sultana2023systematic}, especialmente por meio
+de dispositivos acessíveis como o Myo Armband. Embora a literatura já demonstre a
+eficácia dessa tecnologia no controle de robôs com
+rodas~\cite{sathiyanarayanan2015controlling,morais2016application},
+resta uma lacuna no uso dessas interfaces em plataformas de
+complexidade superior, como robôs com patas, nas quais a latência fim a
+fim do canal de comando impacta diretamente a estabilidade da
 marcha~\cite{siegwart2011introduction,risiglione2021passivity}.
 
 Para endereçar essa lacuna, este trabalho apresenta o desenvolvimento e a
@@ -162,8 +159,7 @@ caracterização de uma interface de teleoperação mioelétrica para o robô
 quadrúpede SH3, sob restrições estritas de tempo real. A
 solução baseia-se em uma arquitetura de três camadas (computador do operador,
 Raspberry Pi e microcontrolador embarcado) que desacopla a aquisição de
-sinais, a classificação de cinco gestos (repouso, flexão, extensão, desvio
-ulnar e desvio radial) e a atuação nos servomotores, combinando o
+sinais, a classificação dos gestos de punho e a atuação nos servomotores, combinando o
 \textit{framework} micro-ROS 2 a estratégias de mitigação de latência no
 \textit{firmware}.
 
@@ -183,11 +179,11 @@ para trabalhos futuros.
 \subsection*{2.1 Visão geral da arquitetura}
 
 O sistema é organizado em três camadas, cujo fluxo de dados é ilustrado
-na Figura~\ref{fig:arquitetura}. Na camada de alto nível, um computador
+na Figura~\ref{fig:arquitetura}. Na camada de alto nível, o computador
 do operador processa os sinais da braçadeira Myo Armband e publica, via
 ROS~2 em sub-rede Wi-Fi dedicada, as velocidades correspondentes ao
-gesto reconhecido (Seção~\ref{sec:classificacao}). Na camada
-intermediária, uma Raspberry Pi hospeda o agente
+gesto reconhecido. Na camada
+intermediária, uma Raspberry Pi 4 hospeda o agente
 micro-ROS~2~\cite{belsare2023microros}, que faz a ponte entre o ROS~2
 e o protocolo XRCE-DDS usado pelo microcontrolador, ao qual se conecta
 por USB~CDC.
@@ -198,12 +194,12 @@ do robô quadrúpede. Cada direção de movimento corresponde a uma
 sequência pré-computada de passos, selecionada por uma máquina de
 estados que coordena a marcha. Antes de iniciar cada passo, a máquina
 consulta a detecção de obstáculos, que funde as leituras do sonar e do
-sensor infravermelho por média ponderada adaptativa --- cujos pesos
+sensor infravermelho por média ponderada adaptativa, cujos pesos
 variam com a distância estimada, privilegiando o sensor mais confiável
-em cada faixa --- e aplica limiares com histerese. Em paralelo, as leituras dos sensores embarcados são feitas
-de forma assíncrona --- por acesso direto à memória (DMA),
+em cada faixa, e aplica limiares com histerese. Em paralelo, as leituras dos sensores embarcados são feitas
+de forma assíncrona por acesso direto à memória (DMA),
 interrupções de borda e \textit{hardware alarms} (para não bloquear
-o laço de controle) e a odometria combina os dados da IMU com os do
+o laço de controle), e a odometria combina os dados da IMU com os do
 sensor de fluxo óptico para melhorar a descrição da trajetória.
 
 
@@ -225,71 +221,33 @@ unidade de medida inercial (IMU) com acelerômetro e giroscópio
 triaxiais. O dispositivo foi escolhido pelo custo acessível e pela
 crescente adoção na comunidade
 científica~\cite{mendez2017evaluation}. No sistema, a braçadeira
-conecta-se diretamente ao computador por Bluetooth, com o EMG em modo
+conecta-se diretamente ao computador do operador por Bluetooth, com o EMG em modo
 bruto, sem filtragem ou retificação pelo dispositivo, e os sinais são
 processados em tempo real.
 
 No pré-processamento, as leituras da IMU são apenas convertidas para o
-Sistema Internacional (m/s\textsuperscript{2} e rad/s), garantindo
-compatibilidade com o ROS~2, e alimentam duas verificações sucessivas
-que decidem se o EMG deve ser processado. A primeira estima a
-inclinação (\textit{pitch}) do antebraço a partir da direção da
-gravidade medida pelo acelerômetro, suavizada por uma média móvel
-exponencial, e só autoriza o prosseguimento quando o antebraço está
-próximo da horizontal, dentro de uma tolerância angular em torno do
-alvo (Tabela~\ref{tab:parametros}). Essa restrição de postura busca
-reduzir a variabilidade do sinal mioelétrico associada à posição do
-membro, efeito documentado por Fougner \textit{et
-al.}~\cite{fougner2011limb}, que mostram sua degradação da
-classificação e propõem medir a posição do membro com acelerômetros. A
-segunda verificação aplica, sobre o mesmo sinal de IMU, o detector de
-parada SHOE, formulado por Skog \textit{et al.}~\cite{skog2010zero} e
-aqui reaproveitado para reconhecer quando o antebraço está parado.
-Assim, o EMG só é processado quando o antebraço está na orientação correta e
-em movimento; caso contrário, suas amostras são descartadas.
+Sistema Internacional (m/s\textsuperscript{2} e rad/s) e alimentam
+duas verificações sucessivas que decidem se o EMG deve ser processado.
+A primeira estima a inclinação (\textit{pitch}) do antebraço a partir
+da gravidade medida pelo acelerômetro, suavizada por média móvel
+exponencial, e só autoriza o prosseguimento quando
+o \textit{pitch} está próximo da horizontal. Essa
+restrição busca reduzir a variabilidade mioelétrica associada à posição
+do membro, efeito documentado por Fougner \textit{et
+al.}~\cite{fougner2011limb}. A segunda verificação aplica o detector de parada
+SHOE~\cite{skog2010zero} sobre o mesmo sinal de IMU para reconhecer quando o
+antebraço está em repouso. Assim, o EMG só é processado quando o braço está 
+em movimento e na orientação desejada; caso contrário, as amostras são descartadas.
 
 Satisfeitas as duas condições, o EMG é acumulado em janelas de 30
 amostras (150~ms a 200~Hz), valor no limite inferior da faixa de 150 a
-250~ms que Smith \textit{et al.}~\cite{smith2011window} identificaram
-como ótima no sistema que avaliaram, no qual janelas maiores reduzem o
-erro de classificação, mas aumentam o atraso do controlador. Para cada
-canal, extraem-se quatro descritores no domínio do tempo: valor
-absoluto médio (MAV), comprimento de forma de onda (WL), número de
-cruzamentos por zero (ZC) e número de trocas de sinal da derivada
+250~ms que Smith \textit{et al.}~\cite{smith2011window} identificam
+como ótima. Para cada canal, extraem-se quatro descritores no domínio
+do tempo: valor absoluto médio (MAV), comprimento de forma de onda
+(WL), cruzamentos por zero (ZC) e trocas de sinal da derivada
 (SSC)~\cite{hudgins1993new}. O vetor resultante é normalizado por
-reescala linear e enviado ao classificador, e, após cada decisão, um
+reescala linear e enviado ao classificador; após cada decisão, um
 intervalo refratário de 20 amostras (100~ms) suprime novas decisões.
-
-% Figura 1 (Seção 2.1): sugere-se destacar nela o trecho
-% IMU -> postura -> movimento -> EMG -> SVM -> velocidades.
-
-\begin{table}[htbp]
-\centering
-\caption{Parâmetros do pré-processamento e da classificação. Canais e
-taxas são especificações do dispositivo; os demais valores foram
-definidos empiricamente ou pelo protocolo de coleta.}
-\label{tab:parametros}
-\small
-\begin{tabular}{@{}lc@{}}
-\toprule
-\textbf{Parâmetro} & \textbf{Valor} \\
-\midrule
-Canais de sEMG & 8 \\
-Taxa de envio do EMG & [CONFIRMAR] \\
-Taxa de envio da IMU & [CONFIRMAR] \\
-Alvo de \textit{pitch} & 0$^\circ$ \\
-Tolerância de \textit{pitch} & $\pm 30^\circ$ \\
-Constante da média exponencial ($\alpha$) & 0,1 \\
-Janela do detector de movimento & 20 amostras \\
-Limiar do detector de movimento ($\gamma$) & 45 \\
-Janela de EMG & 30 amostras (150~ms) \\
-Intervalo refratário & 20 amostras (100~ms) \\
-Classes de gesto & 5 \\
-Janelas coletadas por classe & 50 \\
-Divisão treino/teste & 80\,\%~/~20\,\% (estratificada) \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 Por fim, o vetor de características é classificado por uma máquina de
 vetores de suporte (SVM) com núcleo radial (RBF)~\cite{cortes1995svm},
@@ -300,22 +258,6 @@ sessão, composta por cinquenta janelas para cada uma das cinco classes de
 gesto, registradas com o gesto sustentado e divididas em 80\,\% para
 treino e 20\,\% para teste. Em operação, cada gesto reconhecido é
 convertido em velocidades linear e angular e publicado via ROS~2.
-
-No microcontrolador, a velocidade recebida alimenta uma máquina de
-estados finitos que coordena a marcha: no estado ocioso, o robô aguarda
-um comando; ao receber uma velocidade não nula, a máquina transita para
-o estado de movimento e envia, em lote, as posições pré-computadas dos
-servos à controladora SSC-32 por UART; em seguida, consulta de forma
-não bloqueante, a cada 20~ms, se o passo terminou, antes de avançar ao
-próximo. A detecção de obstáculos combina as leituras de um sensor
-infravermelho (Sharp~IR) e de um sonar (HC-SR04) por média ponderada
-adaptativa, com limiares de parada e retomada distintos (histerese) que
-evitam oscilações na fronteira de detecção. Para que essas leituras não
-bloqueiem o laço de controle, as transações de SPI (PMW3901) e
-I\textsuperscript{2}C (MPU9250) utilizam \textit{Direct Memory Access}
-(DMA), o pulso de eco do sonar é medido por interrupção de borda em
-GPIO, e os ciclos de amostragem são temporizados por \textit{hardware
-alarms}, eliminando laços de espera ativa.
 
 % ---------------------------------------------------------------------
 \section{RESULTADOS E/OU DISCUSSÃO (ou Análise e discussão dos resultados)}
