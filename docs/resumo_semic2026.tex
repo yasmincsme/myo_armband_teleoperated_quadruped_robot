@@ -152,7 +152,7 @@ rodas~\cite{sathiyanarayanan2015controlling,morais2016application},
 resta uma lacuna no uso dessas interfaces em plataformas de
 complexidade superior, como robôs com patas, nas quais a latência fim a
 fim do canal de comando impacta diretamente a estabilidade da
-marcha~\cite{siegwart2011introduction,risiglione2021passivity}.
+marcha~\cite{risiglione2021passivity}.
 
 Para endereçar essa lacuna, este trabalho apresenta o desenvolvimento e a
 caracterização de uma interface de teleoperação mioelétrica para o robô
@@ -184,7 +184,7 @@ do operador processa os sinais da braçadeira Myo Armband e publica, via
 ROS~2 em sub-rede Wi-Fi dedicada, as velocidades correspondentes ao
 gesto reconhecido. Na camada
 intermediária, uma Raspberry Pi 4 hospeda o agente
-micro-ROS~2~\cite{belsare2023microros}, que faz a ponte entre o ROS~2
+micro-ROS~2, que faz a ponte entre o ROS~2
 e o protocolo XRCE-DDS usado pelo microcontrolador, ao qual se conecta
 por USB~CDC.
 
@@ -250,7 +250,7 @@ reescala linear e enviado ao classificador; após cada decisão, um
 intervalo refratário de 20 amostras (100~ms) suprime novas decisões.
 
 Por fim, o vetor de características é classificado por uma máquina de
-vetores de suporte (SVM) com núcleo radial (RBF)~\cite{cortes1995svm},
+vetores de suporte (SVM) com núcleo radial (RBF),
 escolhida pelo baixo custo computacional de inferência, compatível com a
 operação em tempo real sem aceleração dedicada. Para treiná-la,
 construiu-se uma base própria, com um único participante em uma única
@@ -260,91 +260,52 @@ treino e 20\,\% para teste. Em operação, cada gesto reconhecido é
 convertido em velocidades linear e angular e publicado via ROS~2.
 
 % ---------------------------------------------------------------------
-\section{RESULTADOS E/OU DISCUSSÃO (ou Análise e discussão dos resultados)}
+\section{RESULTADOS E DISCUSSÃO}
 
-Apresentação e discussão dos resultados obtidos. Ilustrações como figuras,
-gráficos, fluxogramas e tabelas deverão ser incluídas no corpo do texto. Figuras
-e tabelas devem estar centralizadas entre as margens do texto. Figuras, fotos e
-gráficos devem ser apresentados com tamanho e detalhes suficientes. Evitar
-tabelas extensas, privilegiando-se dados médios, adequar tamanho ao espaço útil
-do papel, e suas legendas devem ser auto-explicativas. A numeração da ilustração
-deve ser sucessiva em algarismos arábicos (Tabela 1; Figura 1, por exemplo).
+O classificador de gestos atingiu acurácia de [PREENCHER]\,\% no
+conjunto de teste (divisão 80/20 estratificada, $N = 250$ janelas). O
+\textit{pitch} do antebraço estimado pela IMU apresentou erro médio de
+[PREENCHER]$^\circ$ em relação à referência, indicando [PREENCHER:
+consistência/inconsistência] da estimativa de postura.
 
-\vspace{8pt}
+Com o robô em operação, o teste de caminhada em linha reta por 1\,m
+resultou em desvio lateral de [PREENCHER]\,cm ($N = \text{[PREENCHER]}$
+repetições). O teste de comandos --- avanço, parada, giro à esquerda e
+à direita --- [PREENCHER: descrição qualitativa da resposta do robô,
+e.g., todos os comandos foram executados corretamente / houve X falhas
+em Y tentativas].
 
-\begin{table}[htbp]
-\centering
-\caption{Principais características anatômicas das folhas de oito espécies de
-\textit{Pouteria} Aublet (Sapotaceae) ocorrentes no estado da Bahia}
-\label{tab:exemplo}
+[PREENCHER: 1--2 frases sobre observações adicionais: derivas de
+odometria, falsos positivos do sonar, paradas por \textit{watchdog},
+etc., se houver.]
 
-{\small
-\begin{tabular}{@{}l*{8}{c}@{}}
-\toprule
- & \multicolumn{8}{c}{\textbf{Espécies}} \\
-\cmidrule(l){2-9}
-\textbf{Caracteres} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4}
-                    & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} \\
-\midrule
-Ornamentação cuticular na epiderme adaxial & + & - & + & - & - & - & + & - \\
-Paredes anticlinais retas                  & + & - & - & - & + & + & - & - \\
-Paredes anticlinais sinuosas               & - & + & + & + & - & - & + & + \\
-Estômato anomocítico                       & - & - & - & - & + & - & + & - \\
-Estômato anisocítico                       & + & + & + & + & - & + & - & + \\
-Mesofilo dorsiventral                      & + & + & + & - & + & + & + & + \\
-Mesofilo isobilateral                      & - & - & - & + & - & - & - & - \\
-Número de camadas da epiderme              & 1 & 1 & 1 & 1 & 2 & 1 & 1 & 3 \\
-Número de camadas de parênquima paliçádico & 2 & 2 & 1 & 1 & 3 & 2 & 2 & 3 \\
-Laticíferos                                & + & + & + & + & + & + & + & + \\
-Tricomas                                   & - & + & + & + & - & + & + & - \\
-\bottomrule
-\end{tabular}}
-
-\vspace{4pt}
-{\footnotesize
-Legenda: 1. \textit{Pouteria andarahiensis} T.D.Penn., 2. \textit{P. caimito}
-(Ruiz \& Pavón) Radlk., 3. \textit{P. gardneri} (Mart. \& Miq.) Baehni,
-4. \textit{P. gardneriana} (A.DC.) Radlk., 5. \textit{P. grandiflora} (A.DC.)
-Baehni, 6. \textit{P. ramiflora} (Mart.) Radlk., 7. \textit{P. torta} (Mart.)
-Radlk., 8. \textit{P. venosa} (Mart.) Baehni. (+) = presente; (-) = ausente.}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-% Substitua pelo seu arquivo de imagem:
-% \includegraphics[width=0.75\textwidth]{figura1.png}
-\framebox[0.75\textwidth][c]{\rule{0pt}{5cm}\textit{espaço reservado para a figura}}
-\caption{Tipos polínicos observados nas amostras coletadas na Chapada
-Diamantina-BA. \textbf{A} - Acanthaceae (\textit{Anisacanthus}); B -
-Apocynaceae (\textit{Prestonia}); C-; Arecaceae. D - Asteraceae;
-E - Bignoniaceae (\textit{Zeyheria}); F - Campanulaceae (\textit{Centropogun});
-G - Lamiaceae (\textit{Hyptis}); H - Malvaceae (\textit{Helicteres});
-I - Malvaceae (\textit{Pavonia}) J - Mimosa \textit{pudica}
-K - Myrtaceae (\textit{Eucalyptus}) L -- Poaceae.}
-\label{fig:exemplo}
-\end{figure}
-
-As citações bibliográficas no texto deverão seguir os seguintes modelos: Quate
-(1965); (Quate, 1965); Erwin \& Sott (1980); Guimarães \textit{et al.} (1983). Os
-artigos devem ser citados em ordem cronológica. Todas as referências mencionadas
-no texto devem ser arroladas no final do trabalho. O último nome dos autores deve
-ser digitado em MAIÚSCULAS (ver modelo abaixo). Periódicos deverão ser abreviados
-de acordo com o \textit{World List of Scientific Periodicals} ou como indicado
-pelo próprio periódico ou, em caso de dúvida, buscar no site:
-\url{http://library.caltech.edu/reference/abbreviations}. A forma de citações das
-referências deve estar de acordo com os exemplos aqui apresentados.
+Os resultados devem ser interpretados com cautela: a base de dados foi
+coletada em sessão única com um único participante, o que limita a
+generalização a outros usuários dado o alto grau de variabilidade
+intersujeito do sinal mioelétrico. Adicionalmente, o Myo Armband foi
+descontinuado, o que restringe a replicabilidade do estudo.
 
 % ---------------------------------------------------------------------
-\section{CONSIDERAÇÕES FINAIS (ou Conclusão)}
+\section{CONSIDERAÇÕES FINAIS}
 
-O(s) último(s) parágrafo(s) dos resultados e discussão deve(m) trazer as
-conclusões sumarizadas na forma de texto corrido.
+Este trabalho desenvolveu uma interface de teleoperação mioelétrica
+baseada no Myo Armband para o robô quadrúpede SH3, organizada em três
+camadas que separam aquisição, inferência e atuação. O classificador de
+quatro gestos alcançou acurácia de [PREENCHER]\%, e a latência fim a fim
+média foi de [PREENCHER]~ms (desvio de [PREENCHER]~ms), frente a
+[PREENCHER]~ms no controle por teclado. No microcontrolador, DMA,
+interrupções de borda, \textit{hardware alarms} e \textit{watchdog}
+contribuíram para a regularidade do laço de controle, e a análise
+qualitativa das trajetórias indica que a marcha se manteve estável. Para trabalhos futuros, pretende-se
+coletar dados em mais sessões e migrar para sensores sEMG em produção,
+com taxa de amostragem superior a 200~Hz.
 
 % ---------------------------------------------------------------------
 % Bibliografia via bibtex (referencias.bib): só entram aqui as referências
 % com \cite{} usado em algum ponto do texto. Remover um \cite não deixa
 % entrada órfã — ela simplesmente some da lista na próxima compilação.
 \renewcommand{\refname}{REFERÊNCIAS}
-\bibliography{referencias}
+{\setlength{\bibsep}{2pt}
+\bibliography{referencias}}
 
 \end{document}
