@@ -101,7 +101,7 @@
 % Com o \linespread global o título já sai com os 15,9 pt da referência.
 % ---------------------------------------------------------------------
 \begin{bloco}
-    \textbf{Interface de Controle Mioelétrico Baseado no Sensor Myo Armband para\\
+    \textbf{Interface de Controle Mioelétrica Baseada no Sensor Myo Armband para\\
     Teleoperação de Robôs}
 \end{bloco}
 
@@ -159,7 +159,7 @@ marcha~\cite{siegwart2011introduction,risiglione2021passivity}.
 
 Para endereçar essa lacuna, este trabalho apresenta o desenvolvimento e a
 caracterização de uma interface de teleoperação mioelétrica para o robô
-quadrúpede SH3 [descrição breve], sob restrições estritas de tempo real. A
+quadrúpede SH3, sob restrições estritas de tempo real. A
 solução baseia-se em uma arquitetura de três camadas (computador do operador,
 Raspberry Pi e microcontrolador embarcado) que desacopla a aquisição de
 sinais, a classificação de cinco gestos (repouso, flexão, extensão, desvio
@@ -182,23 +182,30 @@ para trabalhos futuros.
 
 \subsection*{2.1 Visão geral da arquitetura}
 
-O sistema é organizado em três camadas, cujo fluxo de dados é ilustrado na
-Figura~\ref{fig:arquitetura}. Na primeira camada, a braçadeira Myo Armband
-adquire dados de movimento e de atividade muscular do operador e os
-transmite a um computador central. Esse computador executa o
-pré-processamento dos sinais e um classificador de gestos, inspirado na
-implementação de Caffagni~\cite{caffagni2023myo}, e publica, via ROS 2, as
-velocidades linear e angular correspondentes ao gesto reconhecido. Na
-segunda camada, uma Raspberry Pi hospeda o agente micro-ROS 2 e retransmite
-ao microcontrolador as mensagens recebidas da camada anterior por Wi-Fi
-(ROS~2 DDS); para isso, configurou-se uma subrede dedicada que permitiu a
-propagação dos comandos do ROS~2 e o reconhecimento mútuo dos tópicos e nós
-do computador operador e da Raspberry Pi. Na terceira camada, um Raspberry
-Pi Pico (RP2350) recebe essas velocidades e as converte em comandos de
-posição, enviados em alta frequência à placa controladora SSC-32 através do
-protocolo UART, responsável pelo acionamento dos servomotores. Em paralelo,
-o Pico lê os sensores embarcados: fluxo óptico PMW3901, infravermelho
-SharpIR, sonar HC-SR04 e IMU MPU9250/MPU6500.
+O sistema é organizado em três camadas, cujo fluxo de dados é ilustrado
+na Figura~\ref{fig:arquitetura}. Na camada de alto nível, um computador
+do operador processa os sinais da braçadeira Myo Armband e publica, via
+ROS~2 em sub-rede Wi-Fi dedicada, as velocidades correspondentes ao
+gesto reconhecido (Seção~\ref{sec:classificacao}). Na camada
+intermediária, uma Raspberry Pi hospeda o agente
+micro-ROS~2~\cite{belsare2023microros}, que faz a ponte entre o ROS~2
+e o protocolo XRCE-DDS usado pelo microcontrolador, ao qual se conecta
+por USB~CDC.
+
+Na terceira camada, uma Raspberry Pi Pico~2 (RP2350) recebe as
+velocidades e as converte em comandos de posição para os servomotores
+do robô quadrúpede. Cada direção de movimento corresponde a uma
+sequência pré-computada de passos, selecionada por uma máquina de
+estados que coordena a marcha. Antes de iniciar cada passo, a máquina
+consulta a detecção de obstáculos, que funde as leituras do sonar e do
+sensor infravermelho por média ponderada adaptativa --- cujos pesos
+variam com a distância estimada, privilegiando o sensor mais confiável
+em cada faixa --- e aplica limiares com histerese. Em paralelo, as leituras dos sensores embarcados são feitas
+de forma assíncrona --- por acesso direto à memória (DMA),
+interrupções de borda e \textit{hardware alarms} (para não bloquear
+o laço de controle) e a odometria combina os dados da IMU com os do
+sensor de fluxo óptico para melhorar a descrição da trajetória.
+
 
 \begin{figure}[htbp]
 \centering
@@ -211,16 +218,16 @@ $t_0$ e $t_1$ usados para medir a latência fim a fim.}
 \end{figure}
 
 \subsection*{2.2 Aquisição, pré-processamento e classificação}
-\label{sec:aquisicao-classificacao}
 
 Os sinais do operador são adquiridos pela braçadeira Myo Armband, que
 combina oito canais de eletromiografia de superfície (sEMG) e uma
 unidade de medida inercial (IMU) com acelerômetro e giroscópio
-triaxiais. O dispositivo foi escolhido por seu custo-benefício e por
-sua crescente popularidade na comunidade científica ~\cite{mendez2017evaluation}. No sistema,
-braçadeira conecta-se diretamente ao computador por Bluetooth, com o
-EMG em modo bruto, sem filtragem ou retificação pelo dispositivo, e os
-sinais são processados em tempo real.
+triaxiais. O dispositivo foi escolhido pelo custo acessível e pela
+crescente adoção na comunidade
+científica~\cite{mendez2017evaluation}. No sistema, a braçadeira
+conecta-se diretamente ao computador por Bluetooth, com o EMG em modo
+bruto, sem filtragem ou retificação pelo dispositivo, e os sinais são
+processados em tempo real.
 
 No pré-processamento, as leituras da IMU são apenas convertidas para o
 Sistema Internacional (m/s\textsuperscript{2} e rad/s), garantindo
@@ -284,55 +291,31 @@ Divisão treino/teste & 80\,\%~/~20\,\% (estratificada) \\
 \end{tabular}
 \end{table}
 
-Por fim, o vetor de características é classificado por uma máquina de vetores de suporte (SVM) com núcleo radial (RBF)~\cite{cortes1995svm}, escolhida pelo baixo custo computacional de inferência, compatível com a operação em tempo real sem aceleração dedicada. Para treiná-la, construiu-se uma base própria, com um único participante em uma única sessão, composta por cinquenta janelas para cada uma das cinco classes de gesto, registradas com o gesto sustentado e divididas em 80,\% para treino e 20,\% para teste. Em operação, cada gesto reconhecido pelo modelo treinado é convertido em velocidades linear e angular, publicadas via ROS~2 para a camada intermediária do sistema (Seção~\ref{sec:camada-intermediaria}).
+Por fim, o vetor de características é classificado por uma máquina de
+vetores de suporte (SVM) com núcleo radial (RBF)~\cite{cortes1995svm},
+escolhida pelo baixo custo computacional de inferência, compatível com a
+operação em tempo real sem aceleração dedicada. Para treiná-la,
+construiu-se uma base própria, com um único participante em uma única
+sessão, composta por cinquenta janelas para cada uma das cinco classes de
+gesto, registradas com o gesto sustentado e divididas em 80\,\% para
+treino e 20\,\% para teste. Em operação, cada gesto reconhecido é
+convertido em velocidades linear e angular e publicado via ROS~2.
 
-\subsection*{2.3 Camada intermediária}
-
-A Raspberry Pi recebe \texttt{/cmd\_vel} por rede local (Wi-Fi) e hospeda o
-agente XRCE-DDS que serializa as mensagens ao RP2350 por USB CDC
-(\textit{Communications Device Class}). Essa escolha dispensa conversor
-USB-serial — removendo o \textit{jitter} e a latência de um chip
-FTDI/CP210x do caminho — e usa o mesmo cabo para alimentar o microcontrolador.
-
-\subsection*{2.4 \textit{Firmware} embarcado (RP2350)}
-
-O laço principal do \textit{firmware} alterna o atendimento do executor
-micro-ROS (\texttt{rclc\_executor\_spin\_some}, orçamento de 10~ms por
-iteração) com a rotina de marcha, que gera a trajetória nominal dos servos
-em função do \texttt{/cmd\_vel} corrente e a transmite à SSC-32 por UART. As
-leituras dos sensores são desacopladas desse laço por meio das seguintes
-estratégias de mitigação de latência: (i) \textit{Direct Memory Access}
-(DMA) nas transações do PMW3901 (SPI) e da MPU9250/MPU6500 (I$^2$C),
-evitando que o núcleo responsável pela marcha seja bloqueado em operações de
-entrada e saída; (ii) temporização dos ciclos periódicos de amostragem por
-\textit{hardware alarms} do RP2350, eliminando laços de espera e reduzindo o
-\textit{jitter} de amostragem; (iii) medição do pulso de eco do HC-SR04 por
-interrupção de borda em GPIO (\textit{General Purpose Input/Output}),
-dispensando leitura bloqueante; e (iv) um \textit{watchdog} sobre as
-transações DMA que aborta e rearma a cadeia quando o escravo não confirma a
-transferência em 5~ms, impedindo que uma falha isolada paralise o laço.
-
-\subsection*{2.5 Protocolo experimental}
-
-A coleta da base de treino do classificador e a divisão treino/teste já
-foram descritas na Seção 2.2. Esta subseção cobre apenas o protocolo de
-medição de latência e de avaliação qualitativa das trajetórias.
-
-A latência fim a fim é medida por \textit{timestamps} em dois pontos:
-$t_0$ = instante da decisão do classificador no computador operador, e
-$t_1$ = instante do recebimento do \texttt{/cmd\_vel} correspondente no
-\texttt{cmd\_vel\_callback} do RP2350; o par é propagado como campo adicional
-na própria mensagem para dispensar sincronização externa de relógios. São
-realizadas [PREENCHER: número de repetições] medidas com o robô
-[PREENCHER: parado em bancada / em marcha], das quais se reportam média e
-desvio padrão. Como condição de referência, repete-se o protocolo substituindo
-o pacote Myo pelo \texttt{teleop\_twist\_keyboard}, executado no mesmo
-computador operador e publicando \texttt{/cmd\_vel} sobre a mesma rede
-Wi-Fi — isolando, portanto, apenas o segmento \textit{aquisição + classificação}
-com o restante do caminho idêntico ao do protocolo principal. A coerência
-qualitativa das trajetórias é avaliada visualmente comparando-se as leituras
-publicadas pelos sensores embarcados (fluxo óptico, distância IR e sonar) ao
-comportamento observado do robô durante a locomoção.
+No microcontrolador, a velocidade recebida alimenta uma máquina de
+estados finitos que coordena a marcha: no estado ocioso, o robô aguarda
+um comando; ao receber uma velocidade não nula, a máquina transita para
+o estado de movimento e envia, em lote, as posições pré-computadas dos
+servos à controladora SSC-32 por UART; em seguida, consulta de forma
+não bloqueante, a cada 20~ms, se o passo terminou, antes de avançar ao
+próximo. A detecção de obstáculos combina as leituras de um sensor
+infravermelho (Sharp~IR) e de um sonar (HC-SR04) por média ponderada
+adaptativa, com limiares de parada e retomada distintos (histerese) que
+evitam oscilações na fronteira de detecção. Para que essas leituras não
+bloqueiem o laço de controle, as transações de SPI (PMW3901) e
+I\textsuperscript{2}C (MPU9250) utilizam \textit{Direct Memory Access}
+(DMA), o pulso de eco do sonar é medido por interrupção de borda em
+GPIO, e os ciclos de amostragem são temporizados por \textit{hardware
+alarms}, eliminando laços de espera ativa.
 
 % ---------------------------------------------------------------------
 \section{RESULTADOS E/OU DISCUSSÃO (ou Análise e discussão dos resultados)}
